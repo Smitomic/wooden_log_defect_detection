@@ -1,0 +1,26 @@
+# Environment directories
+.venv/
+venv/
+env/
+
+# IDE / editor settings
+.idea/
+.vscode/
+
+# Data / cache / logs
+data/
+__pycache__/
+*.log
+*.tmp
+
+# Python build artifacts
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,6 +1,19 @@
+import os
+import tempfile
+
 import numpy as np
 import plotly.graph_objects as go
 from skimage import measure
+import plotly.io as pio
+
+CLASS_COLORS = {
+    1: 'yellow',  # Obvod
+    2: 'red',  # Hniloba
+    3: 'blue',  # Dutina
+    4: 'green',  # HrcaZ
+    5: 'purple',  # HrcaN
+    6: 'cyan',  # Trhlina
+}
 
 def show_volume(volume_3d, spacing=(1, 1, 1)):
     print("Building high-resolution 3D mesh viewer (no downsampling)...")
@@ -8,20 +21,10 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
     # Ensure integer labels
     volume_3d = volume_3d.astype(np.uint8)
 
-    # Define per-class colors (adjust as needed)
-    class_colors = {
-        1: 'yellow',  # Obvod
-        2: 'red',     # Hniloba
-        3: 'blue',    # Dutina
-        4: 'green',   # HrcaZ
-        5: 'purple',  # HrcaN
-        6: 'cyan',    # Trhlina
-    }
-
     fig = go.Figure()
 
     # Iterate through all classes except background (0)
-    for cls, color in class_colors.items():
+    for cls, color in CLASS_COLORS.items():
         mask = (volume_3d == cls)
         if np.count_nonzero(mask) == 0:
             continue

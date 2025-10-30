@@ -31,11 +31,16 @@ app_ui = ui.page_sidebar(
     ),
 
     ui.layout_column_wrap(
-        output_widget("plot"),
-        heights="100vh",
-        gap="0"
+        ui.card(
+            output_widget("plot", height="100vh"),
+            full_screen=True,
+            fill=True,
+            style="min-height: 80vh;"
+        ),
+        fill=True
     )
 )
+
 # endregion
 
 # region Server

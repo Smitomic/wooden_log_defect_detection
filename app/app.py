@@ -1,7 +1,7 @@
-import sys, os, tempfile, shutil, threading, glob, asyncio
+import sys, os, tempfile, shutil, threading, queue, glob
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from shiny import App, ui, reactive
+from shiny import App, ui, render, reactive
 from shinywidgets import output_widget, render_widget
 
 from src.pipelines.segmentation_pipeline import SegmentationPipeline
@@ -9,10 +9,10 @@ from src.pipelines.segmentation_pipeline import SegmentationPipeline
 
 def list_model_checkpoints():
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
-    models = glob.glob(os.path.join(base, "**", "*.pt"), recursive=True)
-    if not models:
-        return {"": "No model checkpoints found"}
-    return {m: os.path.relpath(m, start=base) for m in models}
+    checkpoints = glob.glob(os.path.join(base, "**", "*.pt"), recursive=True)
+    if not checkpoints:
+        return {"": "No checkpoints found"}
+    return {ckpt: os.path.relpath(ckpt, base) for ckpt in checkpoints}
 
 
 # region UI
@@ -27,90 +27,132 @@ app_ui = ui.page_sidebar(
         ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
 
         ui.input_action_button("run_btn", "Run Segmentation", class_="btn-primary"),
-        width=300
+        ui.hr(),
+        ui.output_ui("progress_ui"),
     ),
 
     ui.layout_column_wrap(
         ui.card(
-            output_widget("plot", height="100vh"),
+            output_widget("plot", height="90vh"),
             full_screen=True,
             fill=True,
             style="min-height: 80vh;"
         ),
-        fill=True
+    fill=True
     )
 )
-
 # endregion
 
 # region Server
 def server(input, output, session):
+    status = reactive.Value("Ready.")
+    progress = reactive.Value(0)
     fig_val = reactive.Value(None)
+    q = queue.Queue()   # messages from worker thread
 
-    loop = asyncio.get_event_loop()  # Shiny main event loop
-
-    # The background worker that performs segmentation
-    def run_pipeline_background(file_path, model_path, use_crf, use_mrf, prog):
+    # Background worker
+    def run_pipeline_background(path, model_path, use_crf, use_mrf):
         try:
             pipe = SegmentationPipeline(model_type="cnn", use_crf=use_crf, use_mrf=use_mrf)
 
-            # Called during segmentation per slice
             def progress_callback(current, total):
-                pct = int((current / total) * 100)
-                msg = f"Segmenting slices ({current}/{total})"
+                pct = int(100 * current / total)
+                q.put(("progress", pct, f"Segmenting ({current}/{total})"))
 
-                loop.call_soon_threadsafe(
-                    lambda: prog.set(message=msg, value=pct)
-                )
-
-            # Run the pipeline
-            refined_volume, fig = pipe.run(
-                tiff_path=file_path,
+            q.put(("status", "Starting segmentation..."))
+            refined_volume, _ = pipe.run(
+                tiff_path=path,
                 model_path=model_path,
-                visualize=True,
-                progress_callback=progress_callback
+                visualize=False,
+                progress_callback=progress_callback,
             )
 
-            # Final UI update for mesh display
-            loop.call_soon_threadsafe(lambda: fig_val.set(fig))
-            loop.call_soon_threadsafe(lambda: prog.set(message="Segmentation complete", value=100))
-            loop.call_soon_threadsafe(lambda: prog.close())
+            q.put(("status", "Rendering 3D mesh..."))
+            from src.visualization.mesh_viewer import show_volume
+            fig = show_volume(refined_volume)
 
+            q.put(("done", fig))
         except Exception as e:
-            print("Error in background thread:", e)
-            loop.call_soon_threadsafe(lambda: prog.set(message=f"Error: {e}"))
-            loop.call_soon_threadsafe(lambda: prog.close())
+            q.put(("error", str(e)))
 
-    # Start segmentation when Run button pressed
+    # Poll queue regularly
+    @reactive.effect
+    def _poll_queue():
+        reactive.invalidate_later(0.3)
+        while not q.empty():
+            event = q.get()
+
+            if event[0] == "progress":
+                _, pct, msg = event
+                progress.set(pct)
+                status.set(msg)
+
+            elif event[0] == "status":
+                _, msg = event
+                status.set(msg)
+
+            elif event[0] == "done":
+                _, fig = event
+                fig_val.set(fig)
+                progress.set(100)
+                status.set("Completed.")
+
+            elif event[0] == "error":
+                _, msg = event
+                status.set("Error: " + msg)
+
+    # Start pipeline on click
     @reactive.effect
     @reactive.event(input.run_btn)
     def _():
         fileinfo = input.tiff_file()
+        model_path = input.model_path()
+
         if not fileinfo:
+            status.set("No TIFF uploaded.")
+            return
+        if not model_path or not os.path.exists(model_path):
+            status.set("Invalid model selected.")
             return
 
-        # Copy file to safe temp path
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tiff")
         shutil.copyfile(fileinfo[0]["datapath"], tmp.name)
-        tmp.close()
 
-        # Create progress bar on main thread BEFORE starting worker
-        prog = ui.Progress(session=session, min=0, max=100)
-        prog.set(message="Starting segmentation...", value=0)
+        progress.set(0)
+        status.set("Preparing…")
+        fig_val.set(None)
 
-        # Launch worker thread
-        t = threading.Thread(
+        threading.Thread(
             target=run_pipeline_background,
-            args=(tmp.name, input.model_path(), input.use_crf(), input.use_mrf(), prog),
+            args=(tmp.name, model_path, input.use_crf(), input.use_mrf()),
             daemon=True,
-        )
-        t.start()
+        ).start()
 
-    # Render final mesh figure
+    # Progress Bar UI
+    @output
+    @render.ui
+    def progress_ui():
+        pct = progress.get()
+        msg = status.get()
+        return ui.div(
+            ui.div(
+                ui.div(
+                    f"{pct}%",
+                    class_="progress-bar text-white",
+                    role="progressbar",
+                    style=f"width: {pct}%; transition: width 0.25s;",
+                ),
+                class_="progress",
+                style="height: 20px;",
+            ),
+            ui.p(msg)
+        )
+
     @output
     @render_widget
     def plot():
         return fig_val.get()
 # endregion
+
 
 app = App(app_ui, server)

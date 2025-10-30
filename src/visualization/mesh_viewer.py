@@ -57,5 +57,4 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
         showlegend=True,
     )
 
-    print("3D mesh viewer finished.")
     return fig

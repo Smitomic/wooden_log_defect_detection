@@ -27,7 +27,6 @@ app_ui = ui.page_sidebar(
         ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
 
         ui.input_action_button("run_btn", "Run Segmentation", class_="btn-primary"),
-        ui.hr(),
         ui.output_ui("progress_ui"),
     ),
 

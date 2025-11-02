@@ -1,13 +1,9 @@
-import os
-import tempfile
-
 import numpy as np
 import plotly.graph_objects as go
 from skimage import measure
-import plotly.io as pio
 
 CLASS_COLORS = {
-    1: 'yellow',  # Obvod
+    1: '#C8B28A',  # Obvod
     2: 'red',  # Hniloba
     3: 'blue',  # Dutina
     4: 'green',  # HrcaZ
@@ -16,7 +12,7 @@ CLASS_COLORS = {
 }
 
 def show_volume(volume_3d, spacing=(1, 1, 1)):
-    print("Building high-resolution 3D mesh viewer (no downsampling)...")
+    print("Building high-resolution 3D mesh viewer...")
 
     # Ensure integer labels
     volume_3d = volume_3d.astype(np.uint8)
@@ -42,6 +38,8 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
                 name=f"Class {cls}",
                 flatshading=True,
                 lighting=dict(ambient=0.5, diffuse=0.5),
+                legendgroup=f"class_{cls}",  # Group per class
+                showlegend=True,
             ))
         except Exception as e:
             print(f"Skipping class {cls} (marching cubes failed):", e)
@@ -58,6 +56,8 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
         margin=dict(l=0, r=0, b=0, t=30),
         height=900,
         showlegend=True,
+        legend_itemclick="toggle",  # Enable click-to-hide
+        legend_itemdoubleclick="toggleothers"  # Double-click to isolate class
     )
 
     return fig

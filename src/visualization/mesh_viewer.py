@@ -54,7 +54,6 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
         ),
         title="3D Mesh Segmentation",
         margin=dict(l=0, r=0, b=0, t=30),
-        height=900,
         showlegend=True,
         legend_itemclick="toggle",  # Enable click-to-hide
         legend_itemdoubleclick="toggleothers"  # Double-click to isolate class

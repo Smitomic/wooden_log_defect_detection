@@ -28,17 +28,24 @@ app_ui = ui.page_sidebar(
 
         ui.input_action_button("run_btn", "Run Segmentation", class_="btn-primary"),
         ui.output_ui("progress_ui"),
+
+        width="260px",
     ),
 
     ui.layout_column_wrap(
         ui.card(
-            output_widget("plot", height="90vh"),
+            ui.h4("3D Mesh Segmentation"),
+            ui.div(
+                output_widget("plot"),
+                style="width:100%; height:85vh; min-height:600px; overflow:hidden;"
+            ),
             full_screen=True,
             fill=True,
-            style="min-height: 80vh;"
+            style="padding:0; margin:0;"
         ),
-    fill=True
-    )
+        fill=True,
+    ),
+    fill=True,
 )
 # endregion
 

@@ -3,7 +3,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from shiny import App, ui, render, reactive
 from shinywidgets import output_widget, render_widget
-
 from src.pipelines.segmentation_pipeline import SegmentationPipeline
 
 
@@ -16,56 +15,94 @@ def list_model_checkpoints():
 
 
 # region UI
-app_ui = ui.page_sidebar(
-    ui.sidebar(
-        ui.h2("Wood Log Defect Segmentation – 3D Viewer"),
-
-        ui.input_file("tiff_file", "Upload .TIFF log", accept=[".tiff", ".tif"]),
-        ui.input_select("model_path", "Select Model Checkpoint", list_model_checkpoints()),
-
-        ui.input_checkbox("use_crf", "Apply CRF postprocessing", value=True),
-        ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
-
-        ui.input_action_button("run_btn", "Run Segmentation", class_="btn-primary"),
-        ui.output_ui("progress_ui"),
-
-        width="260px",
-    ),
-
-    ui.layout_column_wrap(
-        ui.card(
-            ui.h4("3D Mesh Segmentation"),
-            ui.div(
-                output_widget("plot"),
-                style="width:100%; height:85vh; min-height:600px; overflow:hidden;"
+def app_ui(request):
+    return ui.page_fillable(
+        ui.tags.style("""
+            .shiny-ipywidget-output,
+            .js-plotly-plot,
+            .plot-container,
+            .svg-container {
+                height: 100% !important;
+                width: 100% !important;
+            }
+        """),
+        # HEADER
+        ui.div(
+            ui.h3(
+                "Wood Log Defect Segmentation – 3D Viewer",
+                style="margin:0; font-weight:600;"
             ),
-            full_screen=True,
-            fill=True,
-            style="padding:0; margin:0;"
+            style=(
+                "background-color:#3B6E51; color:white; padding:14px 22px;"
+                "border-bottom:4px solid #A67C52; flex:0 0 auto;"
+            ),
         ),
-        fill=True,
-    ),
-    fill=True,
-)
+
+        # MAIN (sidebar + viewer)
+        ui.layout_sidebar(
+            # Sidebar
+            ui.sidebar(
+                ui.h4("Controls", style="color:#3B6E51; font-weight:600;"),
+
+                ui.input_file("tiff_file", "Upload .tiff log", accept=[".tiff", ".tif"]),
+                ui.input_select("model_path", "Model type", list_model_checkpoints()),
+
+                ui.input_checkbox("use_crf", "Apply CRF postprocessing", value=True),
+                ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
+
+                ui.input_action_button(
+                    "run_btn", "Run Segmentation",
+                    class_="btn btn-primary",
+                    style="background-color:#3B6E51; border-color:#3B6E51; width:100%; font-weight:600;"
+                ),
+
+                ui.output_ui("progress_ui"),
+                open="always",
+                width="260px",
+                style=(
+                    "background-color:#F6F4EF; border-right:2px solid #A67C52;"
+                    "height:100%; overflow-y:auto; padding:16px;"
+                ),
+            ),
+
+            # Viewer (takes remaining space)
+            ui.layout_column_wrap(
+                ui.card(
+                    ui.div(
+                        output_widget("plot"),
+                        style="width:100%; height:100%; min-height:600px; overflow:hidden;"
+                    ),
+                    full_screen=True,
+                    fill=True,
+                ),
+                fill=True,
+            ),
+            fillable=True,
+            class_="flex-fill h-100 overflow-hidden",
+            style="min-height:0;"
+        ),
+        class_="d-flex flex-column vh-100 p-0 m-0",
+        fillable=True,
+        style="min-height:0;"
+    )
 # endregion
 
-# region Server
+# region SERVER
 def server(input, output, session):
     status = reactive.Value("Ready.")
     progress = reactive.Value(0)
     fig_val = reactive.Value(None)
-    q = queue.Queue()   # messages from worker thread
+    q = queue.Queue()
 
-    # Background worker
     def run_pipeline_background(path, model_path, use_crf, use_mrf):
         try:
             pipe = SegmentationPipeline(model_type="cnn", use_crf=use_crf, use_mrf=use_mrf)
 
             def progress_callback(current, total):
                 pct = int(100 * current / total)
-                q.put(("progress", pct, f"Segmenting ({current}/{total})"))
+                q.put(("progress", pct, f"Processing slices ({current}/{total})"))
 
-            q.put(("status", "Starting segmentation..."))
+            q.put(("status", "Segmenting volume..."))
             refined_volume, _ = pipe.run(
                 tiff_path=path,
                 model_path=model_path,
@@ -78,13 +115,13 @@ def server(input, output, session):
             fig = show_volume(refined_volume)
 
             q.put(("done", fig))
+
         except Exception as e:
             q.put(("error", str(e)))
 
-    # Poll queue regularly
     @reactive.effect
-    def _poll_queue():
-        reactive.invalidate_later(0.3)
+    def _poll():
+        reactive.invalidate_later(0.25)
         while not q.empty():
             event = q.get()
 
@@ -107,7 +144,6 @@ def server(input, output, session):
                 _, msg = event
                 status.set("Error: " + msg)
 
-    # Start pipeline on click
     @reactive.effect
     @reactive.event(input.run_btn)
     def _():
@@ -117,8 +153,8 @@ def server(input, output, session):
         if not fileinfo:
             status.set("No TIFF uploaded.")
             return
-        if not model_path or not os.path.exists(model_path):
-            status.set("Invalid model selected.")
+        if not os.path.exists(model_path):
+            status.set("Invalid model checkpoint.")
             return
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tiff")
@@ -134,7 +170,6 @@ def server(input, output, session):
             daemon=True,
         ).start()
 
-    # Progress Bar UI
     @output
     @render.ui
     def progress_ui():
@@ -144,14 +179,16 @@ def server(input, output, session):
             ui.div(
                 ui.div(
                     f"{pct}%",
-                    class_="progress-bar text-white",
-                    role="progressbar",
-                    style=f"width: {pct}%; transition: width 0.25s;",
+                    class_="progress-bar",
+                    style=(
+                        f"width:{pct}%; background-color:#3B6E51;"
+                        "color:white; transition:width 0.25s;"
+                    )
                 ),
                 class_="progress",
-                style="height: 20px;",
+                style="height:24px; border:1px solid #A67C52; background:white;"
             ),
-            ui.p(msg)
+            ui.div(msg, style="font-size:0.85rem; margin-top:4px; color:#3B6E51;")
         )
 
     @output
@@ -159,6 +196,5 @@ def server(input, output, session):
     def plot():
         return fig_val.get()
 # endregion
-
 
 app = App(app_ui, server)

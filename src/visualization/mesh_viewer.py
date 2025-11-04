@@ -52,11 +52,11 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
             aspectmode="data",
             camera=dict(eye=dict(x=1.6, y=1.6, z=0.8))
         ),
-        title="3D Mesh Segmentation",
         margin=dict(l=0, r=0, b=0, t=30),
         showlegend=True,
         legend_itemclick="toggle",  # Enable click-to-hide
-        legend_itemdoubleclick="toggleothers"  # Double-click to isolate class
+        legend_itemdoubleclick="toggleothers",  # Double-click to isolate class
+        uirevision = "constant"
     )
 
     return fig

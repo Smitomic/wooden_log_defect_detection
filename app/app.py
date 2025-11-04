@@ -18,15 +18,39 @@ def list_model_checkpoints():
 def app_ui(request):
     return ui.page_fillable(
         ui.tags.style("""
-            .shiny-ipywidget-output,
-            .js-plotly-plot,
-            .plot-container,
-            .svg-container {
-                height: 100% !important;
+            .bslib-sidebar-layout {
+                flex: 1 1 auto !important;
+                height: 0 !important;
+                min-height: 0 !important;
+            }
+            
+            /* Remove the automatic vertical gap that bslib inserts in page-fill layouts */
+            body.bslib-gap-spacing {
+                gap: 0 !important;
+            }
+            
+            /* Remove spacing only from main viewer and not sidebar */
+            .main.bslib-gap-spacing {
+                padding: 0 !important;
+                margin: 0 !important;
+                gap: 0 !important;
+            }
+
+            /* Ensure plot fills height */
+            #plot, .js-plotly-plot, .plot-container, .svg-container {
                 width: 100% !important;
+                height: 100% !important;
+            }
+
+            .card-body {
+                padding: 0 !important;
+                margin: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
             }
         """),
-        # HEADER
+
+    # HEADER
         ui.div(
             ui.h3(
                 "Wood Log Defect Segmentation – 3D Viewer",

@@ -4,11 +4,20 @@ from skimage import measure
 
 CLASS_COLORS = {
     1: '#C8B28A',  # Obvod
-    2: 'red',  # Hniloba
-    3: 'blue',  # Dutina
-    4: 'green',  # HrcaZ
-    5: 'purple',  # HrcaN
-    6: 'cyan',  # Trhlina
+    2: 'red',      # Hniloba
+    3: 'blue',     # Dutina
+    4: 'green',    # HrcaZ
+    5: 'purple',   # HrcaN
+    6: 'cyan',     # Trhlina
+}
+
+CLASS_LABELS = {
+    1: "Obvod",
+    2: "Hniloba",
+    3: "Dutina",
+    4: "Hrca (Zdravá)",
+    5: "Hrca (Nezdravá)",
+    6: "Trhlina",
 }
 
 def show_volume(volume_3d, spacing=(1, 1, 1)):
@@ -16,7 +25,6 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
 
     # Ensure integer labels
     volume_3d = volume_3d.astype(np.uint8)
-
     fig = go.Figure()
 
     # Iterate through all classes except background (0)
@@ -35,10 +43,10 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
                 i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
                 color=color,
                 opacity=0.15,
-                name=f"Class {cls}",
+                name=CLASS_LABELS.get(cls, f"Class {cls}"),
                 flatshading=True,
                 lighting=dict(ambient=0.5, diffuse=0.5),
-                legendgroup=f"class_{cls}",  # Group per class
+                legendgroup=f"class_{cls}",
                 showlegend=True,
             ))
         except Exception as e:
@@ -52,11 +60,11 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
             aspectmode="data",
             camera=dict(eye=dict(x=1.6, y=1.6, z=0.8))
         ),
-        title="3D Mesh Segmentation",
         margin=dict(l=0, r=0, b=0, t=30),
         showlegend=True,
         legend_itemclick="toggle",  # Enable click-to-hide
-        legend_itemdoubleclick="toggleothers"  # Double-click to isolate class
+        legend_itemdoubleclick="toggleothers",  # Double-click to isolate class
+        uirevision="constant"
     )
 
     return fig

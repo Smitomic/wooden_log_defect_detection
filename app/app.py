@@ -24,19 +24,16 @@ def app_ui(request):
                 min-height: 0 !important;
             }
             
-            /* Remove the automatic vertical gap that bslib inserts in page-fill layouts */
             body.bslib-gap-spacing {
                 gap: 0 !important;
             }
             
-            /* Remove spacing only from main viewer and not sidebar */
             .main.bslib-gap-spacing {
                 padding: 0 !important;
                 margin: 0 !important;
                 gap: 0 !important;
             }
 
-            /* Ensure plot fills height */
             #plot, .js-plotly-plot, .plot-container, .svg-container {
                 width: 100% !important;
                 height: 100% !important;
@@ -47,6 +44,35 @@ def app_ui(request):
                 margin: 0 !important;
                 display: flex !important;
                 flex-direction: column !important;
+            }
+            
+            .shiny-file-input-progress {
+                width: 100% !important;
+                display: block !important;
+                margin-top: 4px;
+            }
+        
+            .shiny-file-input-progress .progress-bar {
+                width: 100% !important;
+            }
+            
+            .shiny-input-container {
+                overflow: visible !important;
+            }
+            
+            .input-group {
+                width: 100% !important;
+                display: flex !important;
+            }
+            
+            .shiny-file-input-progress {
+                width: 100% !important;
+                margin-top: 6px !important;
+                overflow: visible !important;
+            }
+            
+            .shiny-file-input-progress .progress-bar {
+                background-color: #3B6E51 !important;
             }
         """),
 

@@ -66,30 +66,35 @@ def app_ui(request):
         ui.layout_sidebar(
             # Sidebar
             ui.sidebar(
-                ui.h4("Controls", style="color:#3B6E51; font-weight:600;"),
-
-                ui.input_file("tiff_file", "Upload .tiff log", accept=[".tiff", ".tif"]),
-                ui.input_select("model_path", "Model type", list_model_checkpoints()),
-
-                ui.input_checkbox("use_crf", "Apply CRF postprocessing", value=True),
-                ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
-
-                ui.input_action_button(
-                    "run_btn", "Run Segmentation",
-                    class_="btn btn-primary",
-                    style="background-color:#3B6E51; border-color:#3B6E51; width:100%; font-weight:600;"
+                ui.div(
+                    ui.h4("Controls", style="color:#3B6E51; font-weight:600;"),
+                    ui.input_file("tiff_file", "Upload .TIFF log", accept=[".tiff", ".tif"]),
+                    ui.input_select("model_path", "Model Checkpoint", list_model_checkpoints()),
+                    ui.input_checkbox("use_crf", "Apply CRF postprocessing", value=True),
+                    ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
+                    style="display:flex; flex-direction:column; gap:12px; flex:1 1 auto; overflow:auto;"
                 ),
 
-                ui.output_ui("progress_ui"),
+                ui.div(
+                    ui.input_action_button(
+                        "run_btn", "Run Segmentation",
+                        class_="btn btn-primary",
+                        style="background-color:#3B6E51; border-color:#3B6E51; width:100%; font-weight:600;"
+                    ),
+                    ui.output_ui("progress_ui"),
+                    # gap between button and progress + pin block to bottom
+                    style="margin-top:auto; padding-top:12px; display:flex; flex-direction:column; gap:14px;"
+                ),
+
                 open="always",
                 width="260px",
                 style=(
-                    "background-color:#F6F4EF; border-right:2px solid #A67C52;"
-                    "height:100%; overflow-y:auto; padding:16px;"
+                    "display:flex; flex-direction:column; height:100%;"
+                    "background-color:#F6F4EF; border-right:2px solid #A67C52; padding:16px;"
                 ),
             ),
 
-            # Viewer (takes remaining space)
+            # Viewer
             ui.layout_column_wrap(
                 ui.card(
                     ui.div(

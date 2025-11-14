@@ -6,40 +6,20 @@ import matplotlib.pyplot as plt
 
 from src.model import DilatedSegCNN
 from src.datamodule import make_dataloaders
-from src.preprocess import compute_log_bboxes
+from src.train import compute_iou
 
-def compute_iou(preds, targets, num_classes=7, ignore_index=None, return_per_class=False):
-    preds = preds.view(-1)
-    targets = targets.view(-1)
-    ious = []
-    for cls in range(num_classes):
-        if ignore_index is not None and cls == ignore_index:
-            ious.append(float('nan'))
-            continue
-        pred_mask = preds == cls
-        target_mask = targets == cls
-        intersection = (pred_mask & target_mask).sum().float()
-        union = (pred_mask | target_mask).sum().float()
-        if union == 0:
-            ious.append(float('nan'))
-        else:
-            ious.append((intersection / union).item())
-    mean_iou = np.nanmean(ious)
-    if return_per_class:
-        return mean_iou, ious
-    else:
-        return mean_iou
 
 def evaluate_model(weights_path, root_dir, num_classes=7, batch_size=2, size=256):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Data
-    bbox_dict = compute_log_bboxes(root_dir)
+    # using the same datamodule, no bbox, same pairing+crop as training for now
     _, val_loader = make_dataloaders(
-        root_dir=root_dir, batch_size=batch_size, bbox_dict=bbox_dict, size=(size, size)
+        root_dir=root_dir,
+        batch_size=batch_size,
+        size=(size, size),
+        use_augmentation=False,   # for eval we don't use augmentation
     )
 
-    # Model
     model = DilatedSegCNN(in_channels=1, num_classes=num_classes)
     state_dict = torch.load(weights_path, map_location=device)
     model.load_state_dict(state_dict)
@@ -70,8 +50,7 @@ def evaluate_model(weights_path, root_dir, num_classes=7, batch_size=2, size=256
     return mean_iou, per_class_ious
 
 
-def visualize_slices(model, loader, device="cpu", n_slices=5, start_index=0, class_colors=None):
-    # Visualizes multiple consecutive slices with their predictions.
+def visualize_slices(model, loader, device="cpu", n_slices=5, start_index=0):
     model.eval()
     imgs, masks = [], []
     with torch.no_grad():
@@ -83,12 +62,11 @@ def visualize_slices(model, loader, device="cpu", n_slices=5, start_index=0, cla
 
     imgs = torch.cat(imgs, dim=0)
     masks = torch.cat(masks, dim=0)
-    imgs, masks = imgs[start_index:start_index + n_slices], masks[start_index:start_index + n_slices]
+    imgs = imgs[start_index:start_index + n_slices].to(device)
+    masks = masks[start_index:start_index + n_slices]
 
-    imgs = imgs.to(device)
     preds = model(imgs)
     preds = torch.argmax(F.softmax(preds, dim=1), dim=1).cpu()
-
     imgs = imgs.cpu()
 
     n = len(imgs)
@@ -96,17 +74,17 @@ def visualize_slices(model, loader, device="cpu", n_slices=5, start_index=0, cla
 
     for i in range(n):
         plt.subplot(n, 3, 3 * i + 1)
-        plt.imshow(imgs[i, 0], cmap='gray')
+        plt.imshow(imgs[i, 0], cmap="gray")
         plt.title(f"Slice {start_index + i}")
         plt.axis("off")
 
         plt.subplot(n, 3, 3 * i + 2)
-        plt.imshow(masks[i], cmap='jet')
+        plt.imshow(masks[i], cmap="jet")
         plt.title("Ground Truth")
         plt.axis("off")
 
         plt.subplot(n, 3, 3 * i + 3)
-        plt.imshow(preds[i], cmap='jet')
+        plt.imshow(preds[i], cmap="jet")
         plt.title("Prediction")
         plt.axis("off")
 

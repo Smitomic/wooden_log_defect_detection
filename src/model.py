@@ -57,15 +57,3 @@ class DilatedSegCNN(nn.Module):
 
         out = self.classifier(x)
         return out
-
-def dice_loss(logits: torch.Tensor, target: torch.Tensor, eps: float = 1e-6):
-    # Soft Dice for multi-class (one-vs-all).
-    num_classes = logits.shape[1]
-    probs = torch.softmax(logits, dim=1)
-    target_1h = F.one_hot(target, num_classes).permute(0, 3, 1, 2).float()
-    dims = (0, 2, 3)
-    intersect = torch.sum(probs * target_1h, dims)
-    denom = torch.sum(probs + target_1h, dims)
-    dice = (2 * intersect + eps) / (denom + eps)
-    loss = 1 - dice.mean()
-    return loss

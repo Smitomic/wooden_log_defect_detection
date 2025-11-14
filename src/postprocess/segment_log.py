@@ -12,7 +12,6 @@ def segment_tiff_volume(
     model_path,
     num_classes=7,
     device=None,
-    use_crf=False,
     target_size=(256, 256),
     return_probs=False,
     progress_callback=None
@@ -45,12 +44,7 @@ def segment_tiff_volume(
             logits = model(tensor)
             probs = F.softmax(logits, dim=1)[0].cpu().numpy()  # [C,H,W]
 
-            if use_crf:
-                refined = apply_dense_crf((img_resized * 255).astype(np.uint8),
-                                          probs, n_classes=num_classes)
-                segmented_slices.append(refined)
-            else:
-                segmented_slices.append(np.argmax(probs, axis=0))
+            segmented_slices.append(np.argmax(probs, axis=0))
 
             if return_probs:
                 prob_slices.append(probs)

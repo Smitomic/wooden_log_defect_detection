@@ -111,9 +111,7 @@ def compute_global_bbox(mask_paths, margin=10):
 
 
 def compute_log_bboxes(root_dir, margin=10):
-    """
-    For future: compute log-global bounding boxes, probably usable for 3D model training e.g. ViT
-    """
+    # For future: compute log-global bounding boxes, probably usable for 3D model training e.g. ViT
     bbox_dict = {}
     root_dir = os.path.abspath(root_dir)
     log_folders = [f for f in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, f))]

@@ -8,35 +8,29 @@ from tqdm import tqdm
 from src.model import DilatedSegCNN
 from src.datamodule import make_dataloaders
 from src.postprocess.crf import apply_dense_crf
+from src.postprocess.mrf import mrf_gibbs_sampling
 
 
 # region IoU utilities
-def compute_iou(preds, targets, num_classes=7, ignore_index=None, return_per_class=False):
+def compute_iou_global(preds, targets, num_classes=7):
     preds = preds.view(-1)
     targets = targets.view(-1)
+
     ious = []
-
     for cls in range(num_classes):
-        if ignore_index is not None and cls == ignore_index:
-            ious.append(float("nan"))
-            continue
-
         pred_mask = preds == cls
         target_mask = targets == cls
 
-        intersection = (pred_mask & target_mask).sum().float()
-        union = (pred_mask | target_mask).sum().float()
+        intersection = (pred_mask & target_mask).sum().item()
+        union = (pred_mask | target_mask).sum().item()
 
         if union == 0:
             ious.append(float("nan"))
         else:
-            ious.append((intersection / union).item())
+            ious.append(intersection / union)
 
     mean_iou = np.nanmean(ious)
-    if return_per_class:
-        return mean_iou, ious
-    else:
-        return mean_iou
+    return mean_iou, ious
 
 
 class EarlyStopping:
@@ -52,6 +46,7 @@ class EarlyStopping:
             self.best_score = current_score
             return
 
+        # stop if loss increases
         if current_score < self.best_score - self.delta:
             self.best_score = current_score
             self.counter = 0
@@ -61,12 +56,13 @@ class EarlyStopping:
                 self.early_stop = True
 # endregion
 
-# region Evaluation on val set (with optional CRF)
-def evaluate(model, criterion, val_loader, device, num_classes=7, use_crf=False):
+# region Evaluation on val set
+def evaluate(model, criterion, val_loader, device, num_classes=7, use_crf=False, use_mrf=False):
     model.eval()
     val_loss = 0.0
-    val_iou = 0.0
-    ious_per_class = [[] for _ in range(num_classes)]
+
+    all_preds = []
+    all_targets = []
 
     with torch.no_grad():
         for images, masks in val_loader:
@@ -76,52 +72,52 @@ def evaluate(model, criterion, val_loader, device, num_classes=7, use_crf=False)
             loss = criterion(outputs, masks)
             val_loss += loss.item()
 
-            if use_crf:
-                probs = torch.softmax(outputs, dim=1).cpu().numpy().astype(np.float32)
+            probs = torch.softmax(outputs, dim=1)
+
+            # MRF
+            if use_mrf:
+                preds_batch = []
+                probs_np = probs.cpu().numpy()
+                for b in range(len(probs_np)):
+                    pmap = torch.tensor(probs_np[b], dtype=torch.float32)
+                    refined = mrf_gibbs_sampling(pmap)
+                    preds_batch.append(refined)
+                preds = torch.tensor(np.stack(preds_batch), dtype=torch.long)
+
+            # CRF
+            elif use_crf:
+                preds_batch = []
+                probs_np = probs.cpu().numpy()
                 imgs_np = images.cpu().numpy()
 
-                batch_ious = []
-                for b in range(probs.shape[0]):
-                    img = imgs_np[b, 0]  # raw float image
-                    img = img - img.min()  # per-image normalization
-                    img = img / (img.max() - img.min() + 1e-6)
-                    img_gray = (img * 255).astype(np.uint8)
-
-                    probs_b = probs[b]  # shape (C, H, W)
-
-                    # ensure shapes match
-                    if probs_b.shape[1:] != img_gray.shape:
-                        raise ValueError(f"CRF shape mismatch: probs={probs_b.shape}, img={img_gray.shape}")
+                for b in range(len(probs_np)):
+                    img = imgs_np[b, 0]
+                    img_norm = (img - img.min()) / (img.max() - img.min() + 1e-6)
+                    img_gray = (img_norm * 255).astype(np.uint8)
 
                     refined = apply_dense_crf(
                         img_gray,
-                        probs_b,
+                        probs_np[b],
                         n_classes=num_classes,
                     )
+                    preds_batch.append(refined)
 
-                    refined = torch.tensor(refined, dtype=torch.long)
+                preds = torch.tensor(np.stack(preds_batch), dtype=torch.long)
 
-                    iou, per_class = compute_iou(refined, masks[b].cpu(), num_classes, return_per_class=True)
-                    batch_ious.append(iou)
-
-                    for cls, cls_iou in enumerate(per_class):
-                        if not np.isnan(cls_iou):
-                            ious_per_class[cls].append(cls_iou)
-
-                val_iou += sum(batch_ious) / len(batch_ious)
+            # RAW
             else:
-                preds = torch.argmax(outputs, dim=1)
-                batch_ious = []
-                for b in range(preds.shape[0]):
-                    iou, per_class = compute_iou(preds[b], masks[b], num_classes, return_per_class=True)
-                    batch_ious.append(iou)
-                    for cls, cls_iou in enumerate(per_class):
-                        if not np.isnan(cls_iou):
-                            ious_per_class[cls].append(cls_iou)
-                val_iou += sum(batch_ious) / len(batch_ious)
+                preds = torch.argmax(outputs, dim=1).cpu()
 
-    avg_per_class = [np.nanmean(c) if c else float("nan") for c in ious_per_class]
-    return val_loss / len(val_loader), val_iou / len(val_loader), avg_per_class
+            all_preds.append(preds.reshape(-1))
+            all_targets.append(masks.cpu().reshape(-1))
+
+    # global evaluation
+    all_preds = torch.cat(all_preds)
+    all_targets = torch.cat(all_targets)
+
+    mean_iou, per_class_ious = compute_iou_global(all_preds, all_targets, num_classes)
+
+    return val_loss / len(val_loader), mean_iou, per_class_ious
 # endregion
 
 # region Training loop
@@ -135,6 +131,7 @@ def train_model(
     num_classes=7,
     early_stop_patience=15,
     use_crf=False,
+    use_mrf=False,
     use_augmentation=True,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -158,13 +155,15 @@ def train_model(
     best_per_class = []
     best_state = None
 
-    early_stopper = EarlyStopping(patience=early_stop_patience, delta=0.001)
+    early_stopper = EarlyStopping(patience=early_stop_patience, delta=0.0001)
 
     train_losses, val_losses, val_ious = [], [], []
 
     for epoch in range(epochs):
         model.train()
-        running_loss, running_iou = 0.0, 0.0
+        running_loss = 0.0
+
+        train_preds, train_targets = [], []
 
         for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [train]"):
             images, masks = images.to(device), masks.to(device)
@@ -176,29 +175,31 @@ def train_model(
             optimizer.step()
 
             running_loss += loss.item()
-            preds = torch.argmax(outputs, dim=1)
-            batch_iou = compute_iou(preds, masks, num_classes=num_classes)
-            running_iou += batch_iou
 
-        avg_train_loss = running_loss / len(train_loader)
-        avg_train_iou = running_iou / len(train_loader)
+            preds = torch.argmax(outputs, dim=1).cpu()
+            train_preds.append(preds.reshape(-1))
+            train_targets.append(masks.cpu().reshape(-1))
+
+        train_preds = torch.cat(train_preds)
+        train_targets = torch.cat(train_targets)
+
+        train_iou, _ = compute_iou_global(train_preds, train_targets, num_classes)
 
         val_loss, val_iou, per_class_ious = evaluate(
             model, criterion, val_loader, device,
-            num_classes=num_classes, use_crf=use_crf
+            num_classes=num_classes, use_crf=use_crf, use_mrf=use_mrf
         )
 
-        train_losses.append(avg_train_loss)
+        train_losses.append(running_loss / len(train_loader))
         val_losses.append(val_loss)
         val_ious.append(val_iou)
 
         print(
             f"Epoch {epoch+1}/{epochs} | "
-            f"Train Loss: {avg_train_loss:.4f} | Train mIoU: {avg_train_iou:.4f} | "
+            f"Train Loss: {running_loss/len(train_loader):.4f} | Train mIoU: {train_iou:.4f} | "
             f"Val Loss: {val_loss:.4f} | Val mIoU: {val_iou:.4f}"
         )
 
-        # checkpoint best
         if val_iou > best_val_iou:
             best_val_iou = val_iou
             best_epoch = epoch + 1
@@ -207,14 +208,12 @@ def train_model(
             torch.save(best_state, os.path.join(out_dir, "checkpoints", "best.pt"))
             print(f"Saved new best model (IoU={best_val_iou:.4f}).")
 
-        # early stopping
         early_stopper(val_loss)
         if early_stopper.early_stop:
             print(f"Early stopping at epoch {epoch+1}. Best IoU={best_val_iou:.4f}.")
             break
 
-    # save last
-    torch.save(model.state_dict(), os.path.join(out_dir, "checkpoints", "last.pt"))
+    #torch.save(model.state_dict(), os.path.join(out_dir, "checkpoints", "last.pt"))
 
     print(f"\nBest Validation IoU: {best_val_iou:.4f} (epoch {best_epoch})")
     class_names = ["Background", "Obvod", "Hniloba", "Dutina", "HrcaZ", "HrcaN", "Trhlina"]
@@ -236,6 +235,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_classes", type=int, default=7)
     parser.add_argument("--early_stop_patience", type=int, default=15)
     parser.add_argument("--use_crf", action="store_true")
+    parser.add_argument("--use_mrf", action="store_true")
     args = parser.parse_args()
 
     train_model(
@@ -248,4 +248,5 @@ if __name__ == "__main__":
         num_classes=args.num_classes,
         early_stop_patience=args.early_stop_patience,
         use_crf=args.use_crf,
+        use_mrf=args.use_mrf,
     )

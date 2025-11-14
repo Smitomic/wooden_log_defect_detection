@@ -17,6 +17,22 @@ def list_model_checkpoints():
 # region UI
 def app_ui(request):
     return ui.page_fillable(
+        ui.tags.script("""
+               Shiny.addCustomMessageHandler("clear_plot", function(msg) {
+                   let container = document.getElementById("plot");
+                   if (!container) return;
+
+                   // Find the internal plot div
+                   let old_plot = container.querySelector('.js-plotly-plot');
+                   if (old_plot) {
+                       try {
+                           Plotly.purge(old_plot);   // free GPU memory
+                       } catch(e) {}
+                       old_plot.remove();            // remove DOM node
+                   }
+               });
+           """),
+
         ui.tags.style("""
             .bslib-sidebar-layout {
                 flex: 1 1 auto !important;
@@ -210,6 +226,10 @@ def server(input, output, session):
         if not os.path.exists(model_path):
             status.set("Invalid model checkpoint.")
             return
+
+        # Purge old plot
+        fig_val.set(None)
+        session.send_custom_message("clear_plot", {})
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tiff")
         shutil.copyfile(fileinfo[0]["datapath"], tmp.name)

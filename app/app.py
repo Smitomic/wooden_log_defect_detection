@@ -96,7 +96,6 @@ def app_ui(request):
                     ui.h4("Controls", style="color:#3B6E51; font-weight:600;"),
                     ui.input_file("tiff_file", "Upload .TIFF log", accept=[".tiff", ".tif"]),
                     ui.input_select("model_path", "Model Checkpoint", list_model_checkpoints()),
-                    ui.input_checkbox("use_crf", "Apply CRF postprocessing", value=True),
                     ui.input_checkbox("use_mrf", "Apply 3D MRF refinement", value=True),
                     style="display:flex; flex-direction:column; gap:12px; flex:1 1 auto; overflow:auto;"
                 ),
@@ -149,9 +148,9 @@ def server(input, output, session):
     fig_val = reactive.Value(None)
     q = queue.Queue()
 
-    def run_pipeline_background(path, model_path, use_crf, use_mrf):
+    def run_pipeline_background(path, model_path, use_mrf):
         try:
-            pipe = SegmentationPipeline(model_type="cnn", use_crf=use_crf, use_mrf=use_mrf)
+            pipe = SegmentationPipeline(model_type="cnn", use_mrf=use_mrf)
 
             def progress_callback(current, total):
                 pct = int(100 * current / total)
@@ -221,7 +220,7 @@ def server(input, output, session):
 
         threading.Thread(
             target=run_pipeline_background,
-            args=(tmp.name, model_path, input.use_crf(), input.use_mrf()),
+            args=(tmp.name, model_path, input.use_mrf()),
             daemon=True,
         ).start()
 

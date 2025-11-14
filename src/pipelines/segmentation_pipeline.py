@@ -10,10 +10,9 @@ from src.model import DilatedSegCNN
 
 
 class SegmentationPipeline:
-    def __init__(self, model_type="cnn", use_crf=False, use_mrf=False,
+    def __init__(self, model_type="cnn", use_mrf=False,
                  num_classes=7, target_size=(256,256), device=None):
         self.model_type = model_type.lower() # "cnn"  or "vit"
-        self.use_crf = use_crf
         self.use_mrf = use_mrf
         self.num_classes = num_classes
         self.target_size = target_size
@@ -60,7 +59,6 @@ class SegmentationPipeline:
             model_path=model_path,
             num_classes=self.num_classes,
             device=self.device,
-            use_crf=self.use_crf,
             target_size=self.target_size,
             return_probs=True,
             progress_callback=progress_callback,

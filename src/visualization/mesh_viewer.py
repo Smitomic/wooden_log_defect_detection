@@ -27,7 +27,13 @@ def show_volume(volume_3d, spacing=(10,1,1)):
     fig = go.Figure()
 
     for cls, color in CLASS_COLORS.items():
-        mask = (volume_3d == cls)
+
+        #  Obvod mask must include everything except background in order to not leave in gaps after toggling off defects
+        if cls == 1:
+            mask = (volume_3d != 0)        # full log outer hull
+        else:
+            mask = (volume_3d == cls)
+
         if np.count_nonzero(mask) == 0:
             continue
 
@@ -58,8 +64,8 @@ def show_volume(volume_3d, spacing=(10,1,1)):
             yaxis_title="Width (cm)",
             zaxis_title="Height (cm)",
             aspectmode="data",
-            camera=dict(eye=dict(x=-0.8, y=-1, z=0))
-
+            camera=dict(
+                eye=dict(x=-3.2, y=-4, z=0.8))
         ),
         margin=dict(l=0, r=0, b=0, t=30),
         showlegend=True,
@@ -67,7 +73,4 @@ def show_volume(volume_3d, spacing=(10,1,1)):
         legend_itemdoubleclick="toggleothers",  # Double-click to isolate class
         uirevision="constant"
     )
-
     return fig
-
-

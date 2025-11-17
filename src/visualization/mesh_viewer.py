@@ -20,14 +20,12 @@ CLASS_LABELS = {
     6: "Trhlina",
 }
 
-def show_volume(volume_3d, spacing=(1, 1, 1)):
+def show_volume(volume_3d, spacing=(10,1,1)):
     print("Building high-resolution 3D mesh viewer...")
 
-    # Ensure integer labels
     volume_3d = volume_3d.astype(np.uint8)
     fig = go.Figure()
 
-    # Iterate through all classes except background (0)
     for cls, color in CLASS_COLORS.items():
         mask = (volume_3d == cls)
         if np.count_nonzero(mask) == 0:
@@ -35,7 +33,9 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
 
         try:
             verts, faces, normals, values = measure.marching_cubes(
-                mask.astype(np.float32), level=0.5, spacing=spacing
+                mask.astype(np.float32),
+                level=0.5,
+                spacing=spacing
             )
 
             fig.add_trace(go.Mesh3d(
@@ -50,21 +50,24 @@ def show_volume(volume_3d, spacing=(1, 1, 1)):
                 showlegend=True,
             ))
         except Exception as e:
-            print(f"Skipping class {cls} (marching cubes failed):", e)
+            print(f"Skipping class {cls}: {e}")
 
     fig.update_layout(
         scene=dict(
-            xaxis_title="X",
-            yaxis_title="Y",
-            zaxis_title="Z",
+            xaxis_title="Length (cm)",
+            yaxis_title="Width (cm)",
+            zaxis_title="Height (cm)",
             aspectmode="data",
-            camera=dict(eye=dict(x=1.6, y=1.6, z=0.8))
+            camera=dict(eye=dict(x=-0.8, y=-1, z=0))
+
         ),
         margin=dict(l=0, r=0, b=0, t=30),
         showlegend=True,
-        legend_itemclick="toggle",  # Enable click-to-hide
+        legend_itemclick="toggle",   # Enable click-to-hide
         legend_itemdoubleclick="toggleothers",  # Double-click to isolate class
         uirevision="constant"
     )
 
     return fig
+
+

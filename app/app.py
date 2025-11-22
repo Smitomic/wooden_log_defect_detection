@@ -141,7 +141,7 @@ def app_ui(request):
                     ui.card(
                         ui.div(
                             output_widget("plot"),
-                            style="width:100%; height:100%; min-height:600px; overflow:hidden;"
+                            style="width:100%; height:100%; min-height:850px; overflow:hidden;"
                         ),
                         full_screen=True,
                         fill=True,

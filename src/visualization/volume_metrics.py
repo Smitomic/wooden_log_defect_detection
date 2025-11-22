@@ -125,7 +125,7 @@ def compute_volume_metrics(volume_3d: np.ndarray, voxel_size=(1, 1, 1)):
                 )
 
         # 3. Merging anomalies
-        if continuity is not None and cls not in MERGING_ALLOWED:
+        if continuity is not None and cls not in MERGING_ALLOWED and cls != 1:
             if continuity > 0.9 and n_comp > 1:
                 cls_anoms.append(
                     "Over-merged region (high continuity with several components)"

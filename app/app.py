@@ -1,10 +1,12 @@
 import sys, os, tempfile, shutil, threading, queue, glob
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from shiny import App, ui, render, reactive
 from shinywidgets import output_widget, render_widget
 from src.pipelines.segmentation_pipeline import SegmentationPipeline
 from src.visualization.volume_metrics import CLASS_LABELS
+
 
 def list_model_checkpoints():
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
@@ -39,7 +41,7 @@ def app_ui(request):
                 height: 0 !important;
                 min-height: 0 !important;
             }
-            
+
             body.bslib-gap-spacing {
                 gap: 0 !important;
             }
@@ -90,9 +92,17 @@ def app_ui(request):
             .shiny-file-input-progress .progress-bar {
                 background-color: #3B6E51 !important;
             }
+
+            /* Force consistent sidebar + page background on all monitors */
+            body {
+                background-color: #F6F4EF !important;
+            }
+            .bslib-sidebar-layout .sidebar {
+                background-color: #F6F4EF !important;
+            }
         """),
 
-    # HEADER
+        # HEADER
         ui.div(
             ui.h3(
                 "Wood Log Defect Segmentation – 3D Viewer",
@@ -141,7 +151,8 @@ def app_ui(request):
                     ui.card(
                         ui.div(
                             output_widget("plot"),
-                            style="width:100%; height:100%; min-height:850px; overflow:hidden;"
+                            # Make model fill most of viewport height so metrics are below (scroll)
+                            style="width:100%; height:100%; min-height:75vh; overflow:hidden;"
                         ),
                         full_screen=True,
                         fill=True,
@@ -156,12 +167,15 @@ def app_ui(request):
             ),
             fillable=True,
             class_="flex-fill h-100",
-            style="min-height:0; overflow-y:auto;"
+            # Let browser handle vertical scrolling naturally
+            style="min-height:0;"
         ),
         class_="d-flex flex-column vh-100 p-0 m-0",
         fillable=True,
         style="min-height:0;"
     )
+
+
 # endregion
 
 # region SERVER
@@ -214,7 +228,6 @@ def server(input, output, session):
                 )
 
             q.put(("metrics", "\n".join(summary)))
-
 
             q.put(("status", "Rendering 3D mesh..."))
             from src.visualization.mesh_viewer import show_volume
@@ -316,6 +329,8 @@ def server(input, output, session):
     @render.text
     def metrics_text_out():
         return metrics_text.get()
+
+
 # endregion
 
 app = App(app_ui, server)

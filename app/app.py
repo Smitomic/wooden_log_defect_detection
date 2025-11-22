@@ -4,7 +4,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from shiny import App, ui, render, reactive
 from shinywidgets import output_widget, render_widget
 from src.pipelines.segmentation_pipeline import SegmentationPipeline
-
+from src.visualization.volume_metrics import CLASS_LABELS
 
 def list_model_checkpoints():
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
@@ -43,7 +43,7 @@ def app_ui(request):
             body.bslib-gap-spacing {
                 gap: 0 !important;
             }
-            
+
             .main.bslib-gap-spacing {
                 padding: 0 !important;
                 margin: 0 !important;
@@ -61,32 +61,32 @@ def app_ui(request):
                 display: flex !important;
                 flex-direction: column !important;
             }
-            
+
             .shiny-file-input-progress {
                 width: 100% !important;
                 display: block !important;
                 margin-top: 4px;
             }
-        
+
             .shiny-file-input-progress .progress-bar {
                 width: 100% !important;
             }
-            
+
             .shiny-input-container {
                 overflow: visible !important;
             }
-            
+
             .input-group {
                 width: 100% !important;
                 display: flex !important;
             }
-            
+
             .shiny-file-input-progress {
                 width: 100% !important;
                 margin-top: 6px !important;
                 overflow: visible !important;
             }
-            
+
             .shiny-file-input-progress .progress-bar {
                 background-color: #3B6E51 !important;
             }
@@ -137,19 +137,26 @@ def app_ui(request):
 
             # Viewer
             ui.layout_column_wrap(
-                ui.card(
-                    ui.div(
-                        output_widget("plot"),
-                        style="width:100%; height:100%; min-height:600px; overflow:hidden;"
+                ui.div(
+                    ui.card(
+                        ui.div(
+                            output_widget("plot"),
+                            style="width:100%; height:100%; min-height:600px; overflow:hidden;"
+                        ),
+                        full_screen=True,
+                        fill=True,
                     ),
-                    full_screen=True,
-                    fill=True,
+                    ui.card(
+                        ui.pre(ui.output_text("metrics_text")),
+                        style="padding:20px; max-height:300px; overflow:auto;"
+                    ),
+                    style="display:flex; flex-direction:column; gap:5px; width:100%;"
                 ),
                 fill=True,
             ),
             fillable=True,
-            class_="flex-fill h-100 overflow-hidden",
-            style="min-height:0;"
+            class_="flex-fill h-100",
+            style="min-height:0; overflow-y:auto;"
         ),
         class_="d-flex flex-column vh-100 p-0 m-0",
         fillable=True,
@@ -162,6 +169,7 @@ def server(input, output, session):
     status = reactive.Value("Ready.")
     progress = reactive.Value(0)
     fig_val = reactive.Value(None)
+    metrics_text = reactive.Value("")
     q = queue.Queue()
 
     def run_pipeline_background(path, model_path, use_mrf):
@@ -173,12 +181,40 @@ def server(input, output, session):
                 q.put(("progress", pct, f"Processing slices ({current}/{total})"))
 
             q.put(("status", "Segmenting volume..."))
-            refined_volume, _ = pipe.run(
+            refined_volume, _, metrics, anomalies = pipe.run(
                 tiff_path=path,
                 model_path=model_path,
                 visualize=False,
                 progress_callback=progress_callback,
+                return_metrics=True,
             )
+
+            # Format metrics into readable text
+            summary = []
+            for cls, m in metrics.items():
+                name = CLASS_LABELS.get(cls, f"Class {cls}")
+
+                vol = m.get("volume_cm3")
+                comps = m.get("components")
+                cont = m.get("continuity")
+                comp = m.get("compactness")
+
+                # Safe conversions
+                vol_str = f"{vol}" if vol is not None else "0"
+                comps_str = f"{comps}" if comps is not None else "0"
+                cont_str = f"{cont:.3f}" if isinstance(cont, (float, int)) else "N/A"
+                comp_str = f"{comp:.3f}" if isinstance(comp, (float, int)) else "N/A"
+
+                anoms = anomalies.get(cls, [])
+                anom_str = "; ".join(anoms) if anoms else "OK"
+
+                summary.append(
+                    f"**{name}** — Volume: {vol_str} cm³ · Components: {comps_str} · "
+                    f"Continuity: {cont_str} · Compactness: {comp_str} — {anom_str}"
+                )
+
+            q.put(("metrics", "\n".join(summary)))
+
 
             q.put(("status", "Rendering 3D mesh..."))
             from src.visualization.mesh_viewer import show_volume
@@ -210,6 +246,10 @@ def server(input, output, session):
                 progress.set(100)
                 status.set("Completed.")
 
+            elif event[0] == "metrics":
+                _, txt = event
+                metrics_text.set(txt)
+
             elif event[0] == "error":
                 _, msg = event
                 status.set("Error: " + msg)
@@ -229,6 +269,7 @@ def server(input, output, session):
 
         # Purge old plot
         fig_val.set(None)
+        metrics_text.set("")
         session.send_custom_message("clear_plot", {})
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tiff")
@@ -236,7 +277,6 @@ def server(input, output, session):
 
         progress.set(0)
         status.set("Preparing…")
-        fig_val.set(None)
 
         threading.Thread(
             target=run_pipeline_background,
@@ -265,10 +305,17 @@ def server(input, output, session):
             ui.div(msg, style="font-size:0.85rem; margin-top:4px; color:#3B6E51;")
         )
 
+    # 3D plot output
     @output
     @render_widget
     def plot():
         return fig_val.get()
+
+    # Metrics output
+    @output(id="metrics_text")
+    @render.text
+    def metrics_text_out():
+        return metrics_text.get()
 # endregion
 
 app = App(app_ui, server)

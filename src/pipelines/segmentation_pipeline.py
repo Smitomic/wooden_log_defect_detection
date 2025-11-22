@@ -2,17 +2,25 @@ import os
 from glob import glob
 
 import numpy as np
-from src.postprocess.segment_log import segment_tiff_volume
 import torch
+
+from src.postprocess.segment_log import segment_tiff_volume
 from src.postprocess.mrf3d import mrf_gibbs_sampling_3d
 from src.visualization.mesh_viewer import show_volume
+from src.visualization.volume_metrics import compute_volume_metrics
 from src.model import DilatedSegCNN
 
 
 class SegmentationPipeline:
-    def __init__(self, model_type="cnn", use_mrf=False,
-                 num_classes=7, target_size=(256,256), device=None):
-        self.model_type = model_type.lower() # "cnn"  or "vit"
+    def __init__(
+        self,
+        model_type: str = "cnn",
+        use_mrf: bool = False,
+        num_classes: int = 7,
+        target_size=(256, 256),
+        device=None,
+    ):
+        self.model_type = model_type.lower()
         self.use_mrf = use_mrf
         self.num_classes = num_classes
         self.target_size = target_size
@@ -47,13 +55,21 @@ class SegmentationPipeline:
                 return c
         return max(candidates, key=os.path.getmtime)
 
-    def run(self, tiff_path, model_path=None, visualize=True, save_path=None, progress_callback=None):
-        # Full pipeline: TIFF → segmentation → optional CRF → optional MRF → visualization.
+    def run(
+        self,
+        tiff_path,
+        model_path=None,
+        visualize: bool = True,
+        save_path: str | None = None,
+        progress_callback=None,
+        return_metrics: bool = False,
+    ):
+        # Full pipeline: TIFF → 2D segmentation → optional 3D MRF → optional visualization.
         model_path = self._resolve_model_path(model_path)
         print(f"Using model checkpoint: {model_path}")
         print(f"Running pipeline on {self.device} using {self.model_type.upper()}")
 
-        # 1. segmentation per slice (CRF optional) and ask for probability volume as well
+        # 1. Segmentation per slice (probabilities + labels)
         segmented_volume, prob_volume = segment_tiff_volume(
             tiff_path=tiff_path,
             model_path=model_path,
@@ -64,38 +80,42 @@ class SegmentationPipeline:
             progress_callback=progress_callback,
         )
 
-        # 2. MRF refinement
+        # 2. Optional 3D MRF refinement
         if self.use_mrf:
             print("Applying 3-D Gibbs MRF refinement...")
-            prob_tensor = torch.tensor(prob_volume, dtype=torch.float32, device=self.device)
-            refined_labels = mrf_gibbs_sampling_3d(prob_tensor, iterations=3, beta=0.8)
+            prob_tensor = torch.tensor(
+                prob_volume, dtype=torch.float32, device=self.device
+            )
+            refined_labels = mrf_gibbs_sampling_3d(
+                prob_tensor,
+                iterations=3,
+                beta=0.8,
+            )
             refined_volume = refined_labels.cpu().numpy()
         else:
             refined_volume = segmented_volume
 
-        # 3. Save
+        # 3. Optional save
         if save_path:
             import tifffile as tiff
+
             tiff.imwrite(save_path, refined_volume.astype(np.uint8))
             print(f"Saved refined volume to {save_path}")
 
-        # 4. Visualization
+        # 4. Optional 3D visualization
         fig = None
         if visualize:
             print("Building 3D mesh viewer...")
             fig = show_volume(refined_volume)
             print("3D mesh viewer finished...")
-            # fig.show()
 
-        # For per-class confidence or visualization of slices by entropy purposes later
-        """
-        if save_path:
-            import tifffile as tiff
-            tiff.imwrite(save_path.replace(".tiff", "_labels.tiff"), refined_volume.astype(np.uint8))
-            if prob_volume is not None:
-                np.save(save_path.replace(".tiff", "_probs.npy"), prob_volume)
-                
-        entropy = -np.sum(prob_volume * np.log(prob_volume + 1e-6), axis=0)
-        """
+        # 5. Optional 3D quality metrics
+        metrics = None
+        anomalies = None
+        if return_metrics:
+            metrics, anomalies = compute_volume_metrics(refined_volume)
 
-        return refined_volume, fig
+        if return_metrics:
+            return refined_volume, fig, metrics, anomalies
+        else:
+            return refined_volume, fig

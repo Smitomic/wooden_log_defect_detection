@@ -83,7 +83,7 @@ def segment_tiff_volume(
     segmented_volume = np.stack(segmented_slices)  # [D,H,W]
     if return_probs:
         prob_volume = np.stack(prob_slices, axis=1)  # [C,D,H,W]
-        return segmented_volume, prob_volume
+        return segmented_volume, prob_volume, volume
     else:
-        return segmented_volume
+        return segmented_volume, volume
 

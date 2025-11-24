@@ -1,62 +1,62 @@
 {
     "1": {
-        "volume_mean": 8453.559896907216,
-        "volume_std": 2957.432061253053,
-        "components_mean": 3.254295532646048,
-        "components_std": 5.558554946637753,
+        "volume_mean": 8474.180000000002,
+        "volume_std": 2971.9352331552277,
+        "components_mean": 3.0481099656357387,
+        "components_std": 7.814720108849716,
         "continuity_mean": 0.9999965635738832,
-        "continuity_std": 5.8520228061602815e-05,
-        "compactness_mean": 22.693936362549564,
-        "compactness_std": 7.345161130578737
+        "continuity_std": 5.852022806160281e-05,
+        "compactness_mean": 23.63375751751261,
+        "compactness_std": 7.389433764503976
     },
     "2": {
-        "volume_mean": 4.276907216494845,
-        "volume_std": 22.86150550015592,
-        "components_mean": 4.285223367697594,
-        "components_std": 6.596189272801037,
-        "continuity_mean": 0.4631546391752578,
-        "continuity_std": 0.3968021746128001,
-        "compactness_mean": 8.833946976487836,
-        "compactness_std": 8.790059291800304
+        "volume_mean": 3.3054639175257727,
+        "volume_std": 29.880308426414093,
+        "components_mean": 1.604810996563574,
+        "components_std": 3.8563346665580815,
+        "continuity_mean": 0.23231958762886598,
+        "continuity_std": 0.372807779065551,
+        "compactness_mean": 4.291574749622876,
+        "compactness_std": 7.521222520720257
     },
     "3": {
-        "volume_mean": 0.038625429553264604,
-        "volume_std": 0.6565939661078855,
-        "components_mean": 0.037800687285223365,
-        "components_std": 0.47110381619688296,
-        "continuity_mean": 0.0044948453608247415,
-        "continuity_std": 0.05416611659043053,
-        "compactness_mean": 0.08001817357412197,
-        "compactness_std": 1.362660394089485
+        "volume_mean": 0.19491408934707904,
+        "volume_std": 3.243080645259559,
+        "components_mean": 0.044673539518900345,
+        "components_std": 0.3125070115296126,
+        "continuity_mean": 0.026893470790378005,
+        "continuity_std": 0.16020268195148438,
+        "compactness_mean": 0.39046745194755544,
+        "compactness_std": 2.5611080815882756
     },
     "4": {
-        "volume_mean": 10.261408934707903,
-        "volume_std": 30.285557462236156,
-        "components_mean": 8.261168384879726,
-        "components_std": 10.975785782756793,
-        "continuity_mean": 0.4790240549828179,
-        "continuity_std": 0.35235457789313773,
-        "compactness_mean": 11.736970602104694,
-        "compactness_std": 8.511766780057528
+        "volume_mean": 7.610137457044674,
+        "volume_std": 19.460770372373755,
+        "components_mean": 6.962199312714777,
+        "components_std": 7.547463603547379,
+        "continuity_mean": 0.5321443298969072,
+        "continuity_std": 0.3422221497615804,
+        "compactness_mean": 13.821163423160655,
+        "compactness_std": 9.002336502731406
     },
     "5": {
-        "volume_mean": 2.733367697594502,
-        "volume_std": 5.269616827706412,
-        "components_mean": 3.4398625429553267,
-        "components_std": 4.208360846224263,
-        "continuity_mean": 0.6070687285223368,
-        "continuity_std": 0.37272052963921176,
-        "compactness_mean": 12.299966906204174,
-        "compactness_std": 9.553097924038948
+        "volume_mean": 1.7880756013745702,
+        "volume_std": 3.6564303486635805,
+        "components_mean": 2.9656357388316152,
+        "components_std": 3.1599166750227763,
+        "continuity_mean": 0.5551030927835051,
+        "continuity_std": 0.3860303074974631,
+        "compactness_mean": 10.185621213388764,
+        "compactness_std": 8.206947230928014
     },
     "6": {
-        "volume_mean": 26.329312714776634,
-        "volume_std": 169.2898410965546,
-        "components_mean": 15.29896907216495,
-        "components_std": 15.72191650947817,
-        "continuity_mean": 0.6405910652920962,
-        "continuity_std": 0.24533761251102704,
-        "compactness_mean": 20.355287927952343,
-        "compactness_std": 10.466744090920049
+        "volume_mean": 20.56281786941581,
+        "volume_std": 105.31293883572754,
+        "components_mean": 20.072164948453608,
+        "components_std": 23.704617304805698,
+        "continuity_mean": 0.5871443298969071,
+        "continuity_std": 0.24057011279226034,
+        "compactness_mean": 22.875113733935603,
+        "compactness_std": 13.075520022298212
     }
 }

@@ -110,7 +110,7 @@ def visualize_slices(
 ):
     model.eval()
 
-    # ---- collect slices ----
+    # collect slices
     imgs, masks = [], []
     with torch.no_grad():
         for img, mask in loader:
@@ -125,13 +125,13 @@ def visualize_slices(
     imgs = imgs[start_index:start_index + n_slices].to(device)
     masks = masks[start_index:start_index + n_slices]
 
-    # ---- forward pass ----
+    # forward pass
     with torch.no_grad():
         outputs = model(imgs)
         probs = F.softmax(outputs, dim=1)
         preds_raw = torch.argmax(probs, dim=1)
 
-        # ----------------- CRF -----------------
+        # CRF
         if use_crf:
             preds_list = []
             probs_np = probs.cpu().numpy()
@@ -149,7 +149,7 @@ def visualize_slices(
 
             preds = torch.tensor(np.stack(preds_list), dtype=torch.long)
 
-        # ----------------- MRF -----------------
+        # MRF
         elif use_mrf:
             preds_list = []
             probs_np = probs.cpu().numpy()
@@ -161,11 +161,11 @@ def visualize_slices(
 
             preds = torch.tensor(np.stack(preds_list), dtype=torch.long)
 
-        # ----------------- RAW -----------------
+        # RAW
         else:
             preds = preds_raw.cpu()
 
-    # ---- plotting ----
+    # plotting
     n = len(imgs)
     plt.figure(figsize=(12, n * 3))
 

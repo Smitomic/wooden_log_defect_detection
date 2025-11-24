@@ -129,10 +129,9 @@ def compute_volume_metrics(volume_3d: np.ndarray, voxel_size=(1, 1, 1)):
         cls_anoms: list[str] = []
 
         # autocalibrated expectations
-        if expected_values and str(cls) in expected_values:
-            if cls != 1:
-                continue
+        use_auto = expected_values and str(cls) in expected_values and cls != 1
 
+        if use_auto:
             ev = expected_values[str(cls)]
 
             # volume

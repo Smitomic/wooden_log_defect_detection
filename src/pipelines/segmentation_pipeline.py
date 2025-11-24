@@ -4,6 +4,8 @@ from glob import glob
 import numpy as np
 import torch
 
+from src.postprocess.crf import apply_dense_crf
+from src.postprocess.mrf import mrf_gibbs_sampling
 from src.postprocess.segment_log import segment_tiff_volume
 from src.postprocess.mrf3d import mrf_gibbs_sampling_3d
 from src.visualization.mesh_viewer import show_volume
@@ -15,7 +17,7 @@ class SegmentationPipeline:
     def __init__(
         self,
         model_type: str = "cnn",
-        use_mrf: bool = False,
+        use_mrf: bool = True,
         num_classes: int = 7,
         target_size=(256, 256),
         device=None,
@@ -55,6 +57,23 @@ class SegmentationPipeline:
                 return c
         return max(candidates, key=os.path.getmtime)
 
+    def _infer_postprocess_mode(self, model_path):
+        # Example model_path:
+        # logs/old_model_crf/checkpoints/best.pt
+
+        # Go UP TWO levels to reach the actual model directory
+        model_dir = os.path.basename(
+            os.path.dirname(
+                os.path.dirname(model_path)
+            )
+        ).lower()
+
+        if "crf" in model_dir:
+            return "crf"
+        if "mrf" in model_dir:
+            return "mrf2d"
+        return "none"
+
     def run(
         self,
         tiff_path,
@@ -67,10 +86,12 @@ class SegmentationPipeline:
         # Full pipeline: TIFF → 2D segmentation → optional 3D MRF → optional visualization.
         model_path = self._resolve_model_path(model_path)
         print(f"Using model checkpoint: {model_path}")
+        mode = self._infer_postprocess_mode(model_path)
+        print(f"Postprocessing mode detected: {mode}")
         print(f"Running pipeline on {self.device} using {self.model_type.upper()}")
 
         # 1. Segmentation per slice (probabilities + labels)
-        segmented_volume, prob_volume = segment_tiff_volume(
+        segmented_volume, prob_volume, gray_volume = segment_tiff_volume(
             tiff_path=tiff_path,
             model_path=model_path,
             num_classes=self.num_classes,
@@ -79,6 +100,30 @@ class SegmentationPipeline:
             return_probs=True,
             progress_callback=progress_callback,
         )
+
+        # Apply per-slice postprocessing
+        if mode == "crf":
+            # CRF ends up being too slow, while also considering the performance in defect detection being the worst
+            """
+            print("Applying per-slice CRF refinement...")
+            refined = []
+            for i in range(segmented_volume.shape[0]):
+                img_gray = gray_volume[i]  # [H,W]
+                probs = prob_volume[:, i]  # [C,H,W]
+                refined_slice = apply_dense_crf(img_gray, probs)
+                refined.append(refined_slice)
+            segmented_volume = np.stack(refined)
+            """
+
+
+        elif mode == "mrf2d":
+            print("Applying per-slice 2D MRF refinement...")
+            refined = []
+            for i in range(segmented_volume.shape[0]):
+                prob_map = torch.tensor(prob_volume[:, i])
+                refined_slice = mrf_gibbs_sampling(prob_map)
+                refined.append(refined_slice)
+            segmented_volume = np.stack(refined)
 
         # 2. Optional 3D MRF refinement
         if self.use_mrf:

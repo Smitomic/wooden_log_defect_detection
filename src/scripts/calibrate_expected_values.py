@@ -12,7 +12,7 @@ from src.pipelines.segmentation_pipeline import SegmentationPipeline
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 DATA_DIR = os.path.join(BASE, "data", "volume_metric_test")
-MODEL_PATH = os.path.join(BASE, "logs", "old_model_mrf", "best.pt")
+MODEL_PATH = os.path.join(BASE, "logs", "old_model_mrf", "checkpoints", "best.pt")
 OUTPUT_JSON = os.path.join(BASE, "src", "visualization", "expected_values.json")    # Auto-calibration file
 USE_MRF = True
 
@@ -55,7 +55,6 @@ def main():
 
     for i, tiff_path in enumerate(tiff_files, 1):
         print(f"\n[{i}/{len(tiff_files)}] Processing {os.path.basename(tiff_path)}")
-
         refined_vol, _, metrics, anomalies = pipe.run(
             tiff_path=tiff_path,
             model_path=MODEL_PATH,
@@ -90,7 +89,7 @@ def main():
     with open(OUTPUT_JSON, "w") as f:
         json.dump(expected, f, indent=4)
 
-    print(f"\nDONE! Saved autocalibrated expectations → {OUTPUT_JSON}")
+    print(f"\nDONE! Saved autocalibrated expectations -> {OUTPUT_JSON}")
 
     # Print summary for inspection
     print("\nSUMMARY")

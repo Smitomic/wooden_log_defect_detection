@@ -30,6 +30,32 @@ def segment_tiff_volume(
     model.to(device).eval()
 
     volume = tiff.imread(tiff_path).astype("float32")
+
+    # Normalize TIFF shape
+    # Case A: (Z, H, W, 4) or (1, H, W, 4) -> RGBA / BGRA etc.
+    if volume.ndim == 4 and volume.shape[-1] in (3, 4):
+        print(f"[WARNING] TIFF has {volume.shape[-1]} channels — converting to grayscale.")
+        # convert RGB/RGBA -> grayscale
+        volume = volume[..., :3].mean(axis=-1)  # drop alpha if present
+
+    # Case B: (H, W, 4) -> grayscale
+    elif volume.ndim == 3 and volume.shape[-1] in (3, 4):
+        print(f"[WARNING] Single-slice TIFF has {volume.shape[-1]} channels — converting to grayscale.")
+        volume = volume[..., :3].mean(axis=-1)
+        volume = volume[None, ...]  # add Z dimension
+
+    # Case C: (1, H, W) -> expected, do nothing
+
+    # Case D: (H, W) -> single slice
+    elif volume.ndim == 2:
+        volume = volume[None, ...]
+
+    # Case E: completely unexpected shape
+    elif volume.ndim not in (3,):
+        raise ValueError(f"Unsupported TIFF shape {volume.shape} in file {tiff_path}")
+
+    # after normalization, the volume must now be: (Z, H, W)
+
     n_slices = volume.shape[0]
 
     segmented_slices = []
@@ -57,7 +83,7 @@ def segment_tiff_volume(
     segmented_volume = np.stack(segmented_slices)  # [D,H,W]
     if return_probs:
         prob_volume = np.stack(prob_slices, axis=1)  # [C,D,H,W]
-        return segmented_volume, prob_volume
+        return segmented_volume, prob_volume, volume
     else:
-        return segmented_volume
+        return segmented_volume, volume
 

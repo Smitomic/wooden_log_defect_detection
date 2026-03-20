@@ -24,3 +24,5 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+/notebooks/cache
+/notebooks/eval_cache

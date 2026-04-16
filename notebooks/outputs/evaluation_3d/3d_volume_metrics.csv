@@ -1,0 +1,91 @@
+Model,Condition,Log,Class,volume_vox,components,continuity,compactness
+Ground Truth,-,Dub 9,Background,2828322,21,1.0,5.6977
+Ground Truth,-,Dub 9,Bark,132232,4,1.0,307.4338
+Ground Truth,-,Dub 9,Wood,1228082,4,1.0,11.7913
+Ground Truth,-,Dub 9,Knot,5562,15,0.8375,20.8253
+Ground Truth,-,Dub 9,Crack,106,30,0.1792,
+Ground Truth,-,kmen9,Background,3539026,29,0.9999,1.9156
+Ground Truth,-,kmen9,Bark,6030,14,0.6066,44.7028
+Ground Truth,-,kmen9,Wood,645138,1,1.0,14.6264
+Ground Truth,-,kmen9,Knot,48,7,0.5208,5.6059
+Ground Truth,-,kmen9,Crack,4062,182,0.8008,44.1638
+DilatedCNN+MRF log-split,2D only,Dub 9,Background,2823960,1,1.0,4.9415
+DilatedCNN+MRF log-split,2D only,Dub 9,Bark,164129,7,0.9997,107.2425
+DilatedCNN+MRF log-split,2D only,Dub 9,Wood,1197816,3,1.0,11.7171
+DilatedCNN+MRF log-split,2D only,Dub 9,Knot,8083,10,0.7878,18.1346
+DilatedCNN+MRF log-split,2D only,Dub 9,Crack,316,48,0.5759,17.5099
+DilatedCNN+MRF log-split,2D only,kmen9,Background,3539307,2,1.0,1.7173
+DilatedCNN+MRF log-split,2D only,kmen9,Bark,10743,54,0.4066,20.2728
+DilatedCNN+MRF log-split,2D only,kmen9,Wood,641973,1,1.0,12.981
+DilatedCNN+MRF log-split,2D only,kmen9,Knot,130,22,0.5308,6.052
+DilatedCNN+MRF log-split,2D only,kmen9,Crack,2151,111,0.4919,35.732
+DilatedCNN+MRF log-split,2D + 3D MRF,Dub 9,Background,2824042,1,1.0,4.6519
+DilatedCNN+MRF log-split,2D + 3D MRF,Dub 9,Bark,164133,6,0.9998,95.6812
+DilatedCNN+MRF log-split,2D + 3D MRF,Dub 9,Wood,1197240,2,1.0,11.4256
+DilatedCNN+MRF log-split,2D + 3D MRF,Dub 9,Knot,7784,12,0.8068,16.212
+DilatedCNN+MRF log-split,2D + 3D MRF,Dub 9,Crack,1105,231,0.2977,17.6801
+DilatedCNN+MRF log-split,2D + 3D MRF,kmen9,Background,3539455,1,1.0,1.7013
+DilatedCNN+MRF log-split,2D + 3D MRF,kmen9,Bark,10365,38,0.4202,20.2288
+DilatedCNN+MRF log-split,2D + 3D MRF,kmen9,Wood,641654,1,1.0,13.1637
+DilatedCNN+MRF log-split,2D + 3D MRF,kmen9,Knot,102,15,0.5588,7.7436
+DilatedCNN+MRF log-split,2D + 3D MRF,kmen9,Crack,2728,132,0.4106,40.3732
+DilatedCNN+MRF random-split,2D only,Dub 9,Background,2826054,1,1.0,5.0936
+DilatedCNN+MRF random-split,2D only,Dub 9,Bark,183167,6,0.9997,192.22
+DilatedCNN+MRF random-split,2D only,Dub 9,Wood,1177606,3,1.0,11.5973
+DilatedCNN+MRF random-split,2D only,Dub 9,Knot,7277,14,0.7785,19.9672
+DilatedCNN+MRF random-split,2D only,Dub 9,Crack,200,43,0.415,14.7033
+DilatedCNN+MRF random-split,2D only,kmen9,Background,3537780,8,1.0,1.7325
+DilatedCNN+MRF random-split,2D only,kmen9,Bark,8194,23,0.4784,18.9644
+DilatedCNN+MRF random-split,2D only,kmen9,Wood,646832,1,1.0,11.9864
+DilatedCNN+MRF random-split,2D only,kmen9,Knot,47,2,0.8085,4.2336
+DilatedCNN+MRF random-split,2D only,kmen9,Crack,1451,210,0.1509,35.3247
+DilatedCNN+MRF random-split,2D + 3D MRF,Dub 9,Background,2826026,1,1.0,4.8342
+DilatedCNN+MRF random-split,2D + 3D MRF,Dub 9,Bark,183326,2,0.9999,97.8442
+DilatedCNN+MRF random-split,2D + 3D MRF,Dub 9,Wood,1177309,1,1.0,10.7674
+DilatedCNN+MRF random-split,2D + 3D MRF,Dub 9,Knot,7050,14,0.7888,19.468
+DilatedCNN+MRF random-split,2D + 3D MRF,Dub 9,Crack,593,172,0.3356,16.1209
+DilatedCNN+MRF random-split,2D + 3D MRF,kmen9,Background,3537897,3,1.0,1.7075
+DilatedCNN+MRF random-split,2D + 3D MRF,kmen9,Bark,7986,28,0.4885,18.9113
+DilatedCNN+MRF random-split,2D + 3D MRF,kmen9,Wood,646377,1,1.0,12.533
+DilatedCNN+MRF random-split,2D + 3D MRF,kmen9,Knot,39,2,0.8462,5.7725
+DilatedCNN+MRF random-split,2D + 3D MRF,kmen9,Crack,2005,247,0.214,39.2763
+UNet++ log-split,2D only,Dub 9,Background,2821160,1,1.0,5.2279
+UNet++ log-split,2D only,Dub 9,Bark,196512,2,1.0,183.7601
+UNet++ log-split,2D only,Dub 9,Wood,1167528,6,1.0,12.5759
+UNet++ log-split,2D only,Dub 9,Knot,8538,13,0.7597,17.8234
+UNet++ log-split,2D only,Dub 9,Crack,566,61,0.3675,27.0039
+UNet++ log-split,2D only,kmen9,Background,3535736,35,1.0,1.8217
+UNet++ log-split,2D only,kmen9,Bark,6208,13,0.6427,38.8363
+UNet++ log-split,2D only,kmen9,Wood,649340,1,1.0,12.7668
+UNet++ log-split,2D only,kmen9,Knot,52,1,1.0,2.698
+UNet++ log-split,2D only,kmen9,Crack,2968,49,0.6412,44.1714
+UNet++ log-split,2D + 3D MRF,Dub 9,Background,2820873,1,1.0,4.6014
+UNet++ log-split,2D + 3D MRF,Dub 9,Bark,196903,1,1.0,161.365
+UNet++ log-split,2D + 3D MRF,Dub 9,Wood,1167900,1,1.0,10.9838
+UNet++ log-split,2D + 3D MRF,Dub 9,Knot,8062,10,0.7844,14.6791
+UNet++ log-split,2D + 3D MRF,Dub 9,Crack,566,61,0.3675,27.0039
+UNet++ log-split,2D + 3D MRF,kmen9,Background,3535593,2,1.0,1.7117
+UNet++ log-split,2D + 3D MRF,kmen9,Bark,6063,3,0.6569,36.9248
+UNet++ log-split,2D + 3D MRF,kmen9,Wood,649637,1,1.0,12.5211
+UNet++ log-split,2D + 3D MRF,kmen9,Knot,43,1,1.0,3.0831
+UNet++ log-split,2D + 3D MRF,kmen9,Crack,2968,49,0.6412,44.1714
+UNet++ random-split,2D only,Dub 9,Background,2822048,4,1.0,5.3524
+UNet++ random-split,2D only,Dub 9,Bark,194499,8,0.9999,186.9962
+UNet++ random-split,2D only,Dub 9,Wood,1169508,1,1.0,12.0461
+UNet++ random-split,2D only,Dub 9,Knot,7931,14,0.8063,23.1922
+UNet++ random-split,2D only,Dub 9,Crack,318,66,0.3899,34.7789
+UNet++ random-split,2D only,kmen9,Background,3534704,11,1.0,1.7972
+UNet++ random-split,2D only,kmen9,Bark,7817,25,0.5331,37.0654
+UNet++ random-split,2D only,kmen9,Wood,649369,3,1.0,12.8295
+UNet++ random-split,2D only,kmen9,Knot,36,6,0.8333,4.9387
+UNet++ random-split,2D only,kmen9,Crack,2378,177,0.1573,33.9213
+UNet++ random-split,2D + 3D MRF,Dub 9,Background,2821681,1,1.0,4.8081
+UNet++ random-split,2D + 3D MRF,Dub 9,Bark,194973,2,1.0,167.0159
+UNet++ random-split,2D + 3D MRF,Dub 9,Wood,1169700,1,1.0,10.796
+UNet++ random-split,2D + 3D MRF,Dub 9,Knot,7632,9,0.8173,21.6232
+UNet++ random-split,2D + 3D MRF,Dub 9,Crack,318,66,0.3899,34.7789
+UNet++ random-split,2D + 3D MRF,kmen9,Background,3534750,1,1.0,1.7131
+UNet++ random-split,2D + 3D MRF,kmen9,Bark,7239,11,0.5696,23.6262
+UNet++ random-split,2D + 3D MRF,kmen9,Wood,649910,1,1.0,12.4125
+UNet++ random-split,2D + 3D MRF,kmen9,Knot,27,2,0.963,3.7013
+UNet++ random-split,2D + 3D MRF,kmen9,Crack,2378,177,0.1573,33.9213

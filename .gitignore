@@ -27,3 +27,4 @@ Thumbs.db
 /notebooks/cache
 /notebooks/eval_cache
 /notebooks/eval_cache_3D/test
+/.ipynb_checkpoints

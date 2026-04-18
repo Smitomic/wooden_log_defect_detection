@@ -1,12 +1,20 @@
-from skimage import measure
-from scipy.ndimage import label, find_objects
-import os
 import json
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
+import os
 
-CLASS_LABELS = {
+import numpy as np
+from scipy.ndimage import label, find_objects
+from skimage import measure
+
+# 5-class scheme (new models)
+CLASS_LABELS = {          # exported for app.py metrics panel
+    1: "Bark",
+    2: "Wood",
+    3: "Knot",
+    4: "Crack",
+}
+
+# 7-class scheme (old models)
+_OLD_CLASS_LABELS = {
     1: "Obvod",
     2: "Hniloba",
     3: "Dutina",
@@ -15,248 +23,127 @@ CLASS_LABELS = {
     6: "Trhlina",
 }
 
+# Static fallback expectations per scheme
+_NEW_EXPECTED_COMPONENTS = {3: 5,   4: 10}
+_NEW_EXPECTED_VOLUME     = {1: (500, 5000), 2: (5000, 50000), 3: (10, 500), 4: (1, 200)}
 
+_OLD_EXPECTED_COMPONENTS = {4: 8, 5: 8, 2: 1, 3: 1, 6: 2}
+_OLD_EXPECTED_VOLUME     = {4: (5, 20), 5: (5, 20), 2: (10, 60), 3: (5, 40), 6: (1, 20)}
+
+
+# region Helpers
 def _safe_compactness(region_mask: np.ndarray) -> float | None:
-    # Compute a rough compactness measure for a binary region.
     try:
-        verts, faces, normals, values = measure.marching_cubes(
-            region_mask.astype(np.float32), level=0.5
-        )
+        verts, _, _, _ = measure.marching_cubes(region_mask.astype(np.float32), level=0.5)
+        surface = float(verts.shape[0])
+        volume  = float(np.count_nonzero(region_mask))
+        return (surface ** 1.5) / (volume + 1e-6)
     except Exception:
         return None
 
-    surface_area = float(verts.shape[0])  # proxy (we don't need exact)
-    volume = float(np.count_nonzero(region_mask))
-    if volume <= 0:
-        return None
 
-    # Heuristic compactness (lower is "rounder", higher is more irregular)
-    return (surface_area ** 1.5) / (volume + 1e-6)
-
-def _load_expected_values(path=None):
-    # default = expected_values.json next to this file
+def _load_expected_values(path: str | None = None) -> dict | None:
     if path is None:
         path = os.path.join(os.path.dirname(__file__), "expected_values.json")
-
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             data = json.load(f)
-        # ensure keys are str
         return {str(k): v for k, v in data.items()}
-    except:
+    except Exception:
         return None
+# endregion
 
-
-def compute_volume_metrics(volume_3d: np.ndarray, voxel_size=(1, 1, 1)):
+# region Main metric function
+def compute_volume_metrics(
+    volume_3d:    np.ndarray,
+    voxel_size:   tuple = (1, 1, 1),
+    ev_path:      str | None = None,
+    class_scheme: str = "new",
+) -> tuple[dict, dict]:
     """
-    Compute 3D metrics per defect class:
+    Compute 3D quality metrics and anomaly flags for each non-background class.
 
-      - volume_cm3
-      - number of connected components
-      - compactness (mean across components)
-      - continuity (largest component size / total voxels)
-
-    Also returns anomaly flags using autocalibrated expectations
-    if expected_values.json exists, otherwise falls back to
-    static coarse expectations.
+    volume_3d    : (D, H, W) int array with labels
+    voxel_size   : physical voxel dimensions in mm
+    ev_path      : optional path to expected_values.json
+    class_scheme : "new" (5-class) or "old" (7-class)
     """
-    metrics: dict[int, dict] = {}
-    anomalies: dict[int, list[str]] = {}
+    labels_map = CLASS_LABELS if class_scheme == "new" else _OLD_CLASS_LABELS
+    exp_comp   = _NEW_EXPECTED_COMPONENTS if class_scheme == "new" else _OLD_EXPECTED_COMPONENTS
+    exp_vol    = _NEW_EXPECTED_VOLUME     if class_scheme == "new" else _OLD_EXPECTED_VOLUME
+    metrics:   dict[int, dict]       = {}
+    anomalies: dict[int, list[str]]  = {}
 
-    vx, vy, vz = voxel_size
+    vx, vy, vz   = voxel_size
     voxel_volume = vx * vy * vz
 
-    # load autocalibrated expected values (if exist)
-    expected_values = _load_expected_values()
+    expected = _load_expected_values(ev_path)
 
-    # static fallback expectations
-    EXPECTED_COMPONENTS = {
-        4: 8,  # HrcaZ
-        5: 8,  # HrcaN
-        2: 1,  # Hniloba
-        3: 1,  # Dutina
-        6: 2,  # Trhlina
-    }
-
-    EXPECTED_VOLUME_RANGE = {
-        4: (5, 20),
-        5: (5, 20),
-        2: (10, 60),
-        3: (5, 40),
-        6: (1, 20),
-    }
-
-    for cls, name in CLASS_LABELS.items():
-        cls_mask = volume_3d == cls
-        n_vox = int(np.count_nonzero(cls_mask))
+    for cls, name in labels_map.items():
+        mask  = volume_3d == cls
+        n_vox = int(np.count_nonzero(mask))
 
         if n_vox == 0:
-            metrics[cls] = {
-                "volume_cm3": 0.0,
-                "components": 0,
-                "compactness": None,
-                "continuity": None,
-            }
+            metrics[cls]   = {"volume_vox": 0, "volume_cm3": 0.0,
+                               "components": 0, "compactness": None, "continuity": None}
             anomalies[cls] = []
             continue
 
-        # Basic volume
-        vol_cm3 = (n_vox * voxel_volume) / 1000.0
+        vol_cm3 = round((n_vox * voxel_volume) / 1000.0, 2)
 
-        labeled, n_comp = label(cls_mask)
-        slices = find_objects(labeled)
-
-        compacts = []
-        comp_sizes = []
-        for idx, slc in enumerate(slices, start=1):
-            region = labeled[slc] == idx
-            comp_sizes.append(int(np.count_nonzero(region)))
-            c = _safe_compactness(region)
-            if c is not None:
-                compacts.append(c)
+        labeled, n_comp = label(mask)
+        slices          = find_objects(labeled)
+        comp_sizes      = [int((labeled[s] == (i + 1)).sum()) for i, s in enumerate(slices)]
+        compacts        = [c for c in [_safe_compactness((labeled[s] == (i + 1)))
+                                       for i, s in enumerate(slices)] if c is not None]
 
         compactness = float(np.mean(compacts)) if compacts else None
-        continuity = max(comp_sizes) / (n_vox + 1e-6) if comp_sizes else None
+        continuity  = round(max(comp_sizes) / (n_vox + 1e-9), 4) if comp_sizes else None
 
         metrics[cls] = {
-            "volume_cm3": round(vol_cm3, 2),
-            "components": int(n_comp),
+            "volume_vox":  n_vox,
+            "volume_cm3":  vol_cm3,
+            "components":  n_comp,
             "compactness": compactness,
-            "continuity": round(continuity, 3) if continuity is not None else None,
+            "continuity":  continuity,
         }
 
-        # Anomaly detection logic
+        # Anomaly detection
         cls_anoms: list[str] = []
-
-        # autocalibrated expectations
-        use_auto = expected_values and str(cls) in expected_values and cls != 1
+        use_auto = expected and str(cls) in expected
 
         if use_auto:
-            ev = expected_values[str(cls)]
-
-            # volume
-            if ev["volume_std"] > 0:
+            ev = expected[str(cls)]
+            if ev.get("volume_std", 0) > 0:
                 if abs(vol_cm3 - ev["volume_mean"]) > 2 * ev["volume_std"]:
                     cls_anoms.append(
                         f"Volume unusual (expected ~{ev['volume_mean']:.1f}±{ev['volume_std']:.1f})"
                     )
-
-            # components
-            if ev["components_std"] > 0:
+            if ev.get("components_std", 0) > 0:
                 if abs(n_comp - ev["components_mean"]) > 2 * ev["components_std"]:
                     cls_anoms.append(
                         f"Component count unusual (expected ~{ev['components_mean']:.1f})"
                     )
-
-            # continuity
-            if continuity is not None and ev["continuity_std"] > 0:
+            if continuity is not None and ev.get("continuity_std", 0) > 0:
                 if abs(continuity - ev["continuity_mean"]) > 2 * ev["continuity_std"]:
                     cls_anoms.append("Abnormal continuity")
-
-            # compactness
-            if compactness is not None and ev["compactness_std"] > 0:
+            if compactness is not None and ev.get("compactness_std", 0) > 0:
                 if abs(compactness - ev["compactness_mean"]) > 2 * ev["compactness_std"]:
                     cls_anoms.append("Abnormal compactness")
-
         else:
-            # static fallback expectation (if no json available)_
-            if cls in EXPECTED_COMPONENTS:
-                expected = EXPECTED_COMPONENTS[cls]
-                if abs(n_comp - expected) >= 5:
+            if cls in exp_comp:
+                if abs(n_comp - exp_comp[cls]) >= 5:
                     cls_anoms.append(
-                        f"Component count unusual (expected ~{expected}, got {n_comp})"
+                        f"Components unusual (expected ~{exp_comp[cls]}, got {n_comp})"
                     )
-
-            if cls in EXPECTED_VOLUME_RANGE:
-                low, high = EXPECTED_VOLUME_RANGE[cls]
-                if vol_cm3 < low or vol_cm3 > high:
-                    cls_anoms.append(
-                        f"Volume {round(vol_cm3,2)} cm³ is outside typical range {low}-{high} cm³"
-                    )
-
-            if continuity is not None:
-                # high continuity + many parts = over-merged except Obvod
-                if continuity > 0.9 and n_comp > 1 and cls != 1:
-                    cls_anoms.append(
-                        "Over-merged region (high continuity with multiple components)"
-                    )
-                # low continuity + many parts = fragmentation problem
-                if continuity < 0.3 and n_comp > 3:
-                    cls_anoms.append(
-                        "Fragmented region (low continuity with many components)"
-                    )
+            if cls in exp_vol:
+                lo, hi = exp_vol[cls]
+                if vol_cm3 < lo or vol_cm3 > hi:
+                    cls_anoms.append(f"Volume {vol_cm3} cm³ outside typical range {lo}–{hi} cm³")
+            if continuity is not None and continuity < 0.3 and n_comp > 3:
+                cls_anoms.append("Fragmented (low continuity, many components)")
 
         anomalies[cls] = cls_anoms
 
     return metrics, anomalies
-
-def autocalibrate_expected_values(
-    tiff_folder,
-    model_path,
-    save_path="expected_values.json",
-    use_mrf=True
-):
-    # lazy import necessary here to avoid circular import
-    # lazy import necessary here to avoid circular import
-    from src.pipelines.segmentation_pipeline import SegmentationPipeline
-
-    tiffs = sorted([
-        os.path.join(tiff_folder, f)
-        for f in os.listdir(tiff_folder)
-        if f.lower().endswith((".tif", ".tiff"))
-    ])
-
-    pipe = SegmentationPipeline(model_type="cnn", use_mrf=use_mrf)
-
-    rows = []
-
-    for tiff_path in tqdm(tiffs):
-        _, _, metrics, _ = pipe.run(
-            tiff_path=tiff_path,
-            model_path=model_path,
-            visualize=False,
-            return_metrics=True
-        )
-
-        for cls, m in metrics.items():
-            rows.append({
-                "class": cls,
-                "volume": m["volume_cm3"],
-                "components": m["components"],
-                "continuity": m["continuity"],
-                "compactness": m["compactness"],
-            })
-
-    df = pd.DataFrame(rows)
-
-    # Build expectations dynamically
-    expected = {}
-
-    for cls in CLASS_LABELS.keys():
-        sub = df[df["class"] == cls]
-
-        if len(sub) == 0:
-            continue
-
-        expected[cls] = {
-            "volume_mean": float(sub["volume"].mean()),
-            "volume_std": float(sub["volume"].std()),
-
-            "components_mean": float(sub["components"].mean()),
-            "components_std": float(sub["components"].std()),
-
-            "continuity_mean": float(sub["continuity"].mean()),
-            "continuity_std": float(sub["continuity"].std()),
-
-            "compactness_mean": float(sub["compactness"].mean()),
-            "compactness_std": float(sub["compactness"].std()),
-        }
-
-    with open(save_path, "w") as f:
-        json.dump(expected, f, indent=2)
-
-    print(f"Saved autocalibrated expectations to {save_path}")
-    return expected
-
-if __name__ == "__main__":
-    print(_load_expected_values())
+# endregion

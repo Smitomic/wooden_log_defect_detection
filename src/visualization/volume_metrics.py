@@ -42,9 +42,13 @@ def _safe_compactness(region_mask: np.ndarray) -> float | None:
         return None
 
 
-def _load_expected_values(path: str | None = None) -> dict | None:
+def _load_expected_values(path: str | None = None, class_scheme: str = "new") -> dict | None:
     if path is None:
-        path = os.path.join(os.path.dirname(__file__), "expected_values.json")
+        filename = "expected_values_new.json" if class_scheme == "new" else "expected_values_old.json"
+        path = os.path.join(os.path.dirname(__file__), filename)
+        # Fall back to legacy expected_values.json for old scheme if new file absent
+        if not os.path.exists(path) and class_scheme == "old":
+            path = os.path.join(os.path.dirname(__file__), "expected_values.json")
     try:
         with open(path) as f:
             data = json.load(f)
@@ -57,27 +61,31 @@ def _load_expected_values(path: str | None = None) -> dict | None:
 def compute_volume_metrics(
     volume_3d:    np.ndarray,
     voxel_size:   tuple = (1, 1, 1),
-    ev_path:      str | None = None,
     class_scheme: str = "new",
 ) -> tuple[dict, dict]:
     """
-    Compute 3D quality metrics and anomaly flags for each non-background class.
+    Compute 3D structural metrics for each non-background class.
 
+    Anomaly detection has been removed - the metrics are presented as-is
+    for the user to interpret. Flagging model predictions as anomalous based
+    on statistics derived from those same predictions is circular.
+
+    Parameters:
     volume_3d    : (D, H, W) int array with labels
     voxel_size   : physical voxel dimensions in mm
-    ev_path      : optional path to expected_values.json
     class_scheme : "new" (5-class) or "old" (7-class)
+
+    Returns:
+    metrics   : dict[cls_int → {volume_vox, volume_cm3, components, compactness, continuity}]
+    anomalies : dict[cls_int → list]  - always empty dicts, kept for API compatibility
     """
     labels_map = CLASS_LABELS if class_scheme == "new" else _OLD_CLASS_LABELS
-    exp_comp   = _NEW_EXPECTED_COMPONENTS if class_scheme == "new" else _OLD_EXPECTED_COMPONENTS
-    exp_vol    = _NEW_EXPECTED_VOLUME     if class_scheme == "new" else _OLD_EXPECTED_VOLUME
-    metrics:   dict[int, dict]       = {}
-    anomalies: dict[int, list[str]]  = {}
+
+    metrics:   dict[int, dict]      = {}
+    anomalies: dict[int, list]      = {}
 
     vx, vy, vz   = voxel_size
     voxel_volume = vx * vy * vz
-
-    expected = _load_expected_values(ev_path)
 
     for cls, name in labels_map.items():
         mask  = volume_3d == cls
@@ -100,50 +108,14 @@ def compute_volume_metrics(
         compactness = float(np.mean(compacts)) if compacts else None
         continuity  = round(max(comp_sizes) / (n_vox + 1e-9), 4) if comp_sizes else None
 
-        metrics[cls] = {
+        metrics[cls]   = {
             "volume_vox":  n_vox,
             "volume_cm3":  vol_cm3,
             "components":  n_comp,
             "compactness": compactness,
             "continuity":  continuity,
         }
-
-        # Anomaly detection
-        cls_anoms: list[str] = []
-        use_auto = expected and str(cls) in expected
-
-        if use_auto:
-            ev = expected[str(cls)]
-            if ev.get("volume_std", 0) > 0:
-                if abs(vol_cm3 - ev["volume_mean"]) > 2 * ev["volume_std"]:
-                    cls_anoms.append(
-                        f"Volume unusual (expected ~{ev['volume_mean']:.1f}±{ev['volume_std']:.1f})"
-                    )
-            if ev.get("components_std", 0) > 0:
-                if abs(n_comp - ev["components_mean"]) > 2 * ev["components_std"]:
-                    cls_anoms.append(
-                        f"Component count unusual (expected ~{ev['components_mean']:.1f})"
-                    )
-            if continuity is not None and ev.get("continuity_std", 0) > 0:
-                if abs(continuity - ev["continuity_mean"]) > 2 * ev["continuity_std"]:
-                    cls_anoms.append("Abnormal continuity")
-            if compactness is not None and ev.get("compactness_std", 0) > 0:
-                if abs(compactness - ev["compactness_mean"]) > 2 * ev["compactness_std"]:
-                    cls_anoms.append("Abnormal compactness")
-        else:
-            if cls in exp_comp:
-                if abs(n_comp - exp_comp[cls]) >= 5:
-                    cls_anoms.append(
-                        f"Components unusual (expected ~{exp_comp[cls]}, got {n_comp})"
-                    )
-            if cls in exp_vol:
-                lo, hi = exp_vol[cls]
-                if vol_cm3 < lo or vol_cm3 > hi:
-                    cls_anoms.append(f"Volume {vol_cm3} cm³ outside typical range {lo}–{hi} cm³")
-            if continuity is not None and continuity < 0.3 and n_comp > 3:
-                cls_anoms.append("Fragmented (low continuity, many components)")
-
-        anomalies[cls] = cls_anoms
+        anomalies[cls] = []
 
     return metrics, anomalies
 # endregion

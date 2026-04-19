@@ -14,7 +14,9 @@ from src.pipelines.segmentation_pipeline import MODEL_REGISTRY, SegmentationPipe
 from src.visualization.volume_metrics import CLASS_LABELS, _OLD_CLASS_LABELS
 
 
+
 # Model choices for the UI dropdown
+
 MODEL_CHOICES = {
     "New models (5-class)": {
         "DilatedCNN+MRF log-split":    "DilatedCNN+MRF log-split",
@@ -55,7 +57,7 @@ def app_ui(request):
         ui.tags.style("""
             body { background-color: #F6F4EF !important; }
 
-            /* These two rules close the gap — bslib adds bslib-gap-spacing
+            /* These two rules close the gap - bslib adds bslib-gap-spacing
                to body and to the main content wrapper */
             body.bslib-gap-spacing {
                 gap: 0 !important;
@@ -101,7 +103,6 @@ def app_ui(request):
             .metrics-table tr:last-child td { border-bottom: none; }
             .anom-ok   { color: #3B6E51; }
             .anom-warn { color: #C0392B; font-weight: 600; }
-
             .shiny-file-input-progress .progress-bar {
                 background-color: #3B6E51 !important;
             }
@@ -226,7 +227,7 @@ def server(input, output, session):
     status   = reactive.Value("Ready.")
     progress = reactive.Value(0)
     fig_val  = reactive.Value(None)
-    metrics_val = reactive.Value(None)   # dict: cls  {metrics, anomalies}
+    metrics_val = reactive.Value(None)   # dict: cls -> {metrics, anomalies}
     q        = queue.Queue()
 
     # Model hint text (updates when selector changes)
@@ -269,7 +270,7 @@ def server(input, output, session):
             q.put(("status", "Rendering 3D mesh…"))
 
             from src.visualization.mesh_viewer import show_volume
-            fig = show_volume(refined_volume, title=f"3D — {model_name}")
+            fig = show_volume(refined_volume, title=f"3D - {model_name}")
 
             q.put(("done", fig))
 
@@ -413,10 +414,6 @@ def server(input, output, session):
             cont_str = f"{cont:.3f}" if isinstance(cont, float) else "N/A"
             comp_str = f"{comp:.3f}" if isinstance(comp, float) else "N/A"
 
-            anoms     = anomalies.get(cls, [])
-            anom_cls  = "anom-warn" if anoms else "anom-ok"
-            anom_str  = "; ".join(anoms) if anoms else "OK"
-
             rows_html += f"""
             <tr>
                 <td><strong>{name}</strong></td>
@@ -424,7 +421,6 @@ def server(input, output, session):
                 <td>{comps}</td>
                 <td>{cont_str}</td>
                 <td>{comp_str}</td>
-                <td class="{anom_cls}">{anom_str}</td>
             </tr>"""
 
         table_html = f"""
@@ -436,7 +432,6 @@ def server(input, output, session):
                     <th>Components</th>
                     <th>Continuity</th>
                     <th>Compactness</th>
-                    <th>Anomalies</th>
                 </tr>
             </thead>
             <tbody>{rows_html}</tbody>

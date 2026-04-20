@@ -1,244 +1,121 @@
-import os
-import shutil
-from collections import defaultdict
+import torch
+import torch.nn as nn
+import torchvision.models as tvm
 
-import cv2
-import numpy as np
-from tqdm import tqdm
-
-from .config import CLASS_REMAP, PATCH_SIZE
-from .data import get_log_id
+from .config import NUM_CLASSES
 
 
-# region Crop / remap
-def crop_to_foreground(
-        img: np.ndarray,
-        mask: np.ndarray,
-        margin: int = 10,
-) -> tuple[np.ndarray, np.ndarray]:
-    # Tight crop around the non-background region of *mask*.
-    coords = np.column_stack(np.where(mask > 0))
-    if coords.size == 0:
-        return img, mask
-    y_min, x_min = coords.min(axis=0)
-    y_max, x_max = coords.max(axis=0)
-    y_min = max(y_min - margin, 0);
-    x_min = max(x_min - margin, 0)
-    y_max = min(y_max + margin, img.shape[0])
-    x_max = min(x_max + margin, img.shape[1])
-    return img[y_min:y_max, x_min:x_max], mask[y_min:y_max, x_min:x_max]
 
-
-def remap_mask(mask: np.ndarray, class_remap: dict | None = None) -> np.ndarray:
+# region DilatedSegCNN
+class DilatedSegCNN(nn.Module):
     """
-    Default mapping (from config.CLASS_REMAP):
-        raw 1 -> 0  Background
-        raw 2 -> 1  Bark
-        raw 3 -> 2  Wood
-        raw 4 -> 3  Knot
-        raw 5 -> 4  Crack
+    Custom segmentation CNN with dilated encoder blocks and transposed-conv
+    decoder with residual skip connections.
+
+    Encoder dilations: 1 → 2 → 4 → 8  (captures multi-scale texture without
+    pooling-induced spatial loss in the early layers).
     """
-    if class_remap is None:
-        class_remap = CLASS_REMAP
-    out = np.zeros_like(mask, dtype=np.int64)
-    for raw, idx in class_remap.items():
-        out[mask == raw] = idx
-    return out
+
+    def __init__(self, in_channels: int = 1, num_classes: int = NUM_CLASSES):
+        super().__init__()
+        self.pool = nn.MaxPool2d(2)
+        self.enc1 = self._block(in_channels,  64,  dilation=1)
+        self.enc2 = self._block(64,  128, dilation=2)
+        self.enc3 = self._block(128, 256, dilation=4)
+        self.enc4 = self._block(256, 512, dilation=8)
+        self.dec3 = self._upblock(512, 256)
+        self.dec2 = self._upblock(256, 128)
+        self.dec1 = self._upblock(128,  64)
+        self.classifier = nn.Conv2d(64, num_classes, kernel_size=1)
+
+    def _block(self, in_c: int, out_c: int, dilation: int) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Conv2d(in_c, out_c, 3, padding=dilation, dilation=dilation),
+            nn.BatchNorm2d(out_c), nn.ReLU(inplace=True),
+            nn.Conv2d(out_c, out_c, 3, padding=dilation, dilation=dilation),
+            nn.BatchNorm2d(out_c), nn.ReLU(inplace=True),
+        )
+
+    def _upblock(self, in_c: int, out_c: int) -> nn.Sequential:
+        return nn.Sequential(
+            nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2),
+            nn.BatchNorm2d(out_c), nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x1 = self.enc1(x)
+        x2 = self.enc2(self.pool(x1))
+        x3 = self.enc3(self.pool(x2))
+        x4 = self.enc4(self.pool(x3))
+        x  = self.dec3(x4) + x3   # residual skip
+        x  = self.dec2(x)  + x2
+        x  = self.dec1(x)  + x1
+        return self.classifier(x)
 # endregion
 
-# region Single-slice load + preprocess
-def load_and_preprocess(
-        img_path: str,
-        mask_path: str,
-        patch_size: int = PATCH_SIZE,
-) -> tuple[np.ndarray, np.ndarray]:
+# region UNet++ with pretrained ResNet34 encoder
+def build_unetpp(num_classes: int = NUM_CLASSES) -> nn.Module:
     """
-    Load one (image, mask) pair, apply per-slice crop, resize, and
-    **z-score normalise** the image.
+    Build a UNet++ model with a ResNet34 encoder pre-trained on ImageNet.
 
-    Z-score normalisation is mandatory: the trained models were trained with
-    ``(img - mean) / std`` — NOT ``img / 255``.  Using /255 here will
-    produce silently wrong predictions.
-
-    Returns:
-    img  : float32 ndarray, shape (1, H, W), z-score normalised
-    mask : int64  ndarray, shape (H, W),    class indices 0–4
+    The encoder's first conv layer is adapted for 1-channel (grayscale) input
+    by averaging the 3-channel weights along the channel dimension.
     """
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-    if img is None: raise FileNotFoundError(img_path)
-    if mask is None: raise FileNotFoundError(mask_path)
+    try:
+        import segmentation_models_pytorch as smp
+    except ImportError as exc:
+        raise ImportError(
+            "segmentation_models_pytorch is required for UNet++. "
+            "Install with: pip install segmentation-models-pytorch"
+        ) from exc
 
-    if mask.shape[:2] != img.shape[:2]:
-        mask = cv2.resize(mask, (img.shape[1], img.shape[0]),
-                          interpolation=cv2.INTER_NEAREST)
-
-    img, mask = crop_to_foreground(img, mask)
-    img = cv2.resize(img, (patch_size, patch_size), interpolation=cv2.INTER_AREA)
-    mask = cv2.resize(mask, (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
-
-    # Z-score normalise (per-image, NOT per-dataset)
-    img = img.astype(np.float32)
-    img = (img - img.mean()) / (img.std() + 1e-6)
-
-    return (
-        np.expand_dims(img, 0).astype(np.float32),
-        remap_mask(mask).astype(np.int64),
-    )
-# endregion
-
-# region Per-slice cache  (training + 2D evaluation)
-def build_cache(
-        pairs: list[tuple[str, str]],
-        cache_dir: str,
-        force: bool = False,
-        patch_size: int = PATCH_SIZE,
-) -> list[tuple[str, str]]:
-    """
-    Pre-process all pairs and save as .npy files.
-    Returns a list of (img_npy_path, mask_npy_path) tuples.
-
-    Uses per-slice ``crop_to_foreground`` - appropriate for 2D evaluation
-    and training.  Do NOT use for 3D volume assembly (use
-    ``build_cache_global`` instead).
-    """
-    if force and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
-
-    cached = []
-    for img_path, mask_path in tqdm(pairs, desc=f"Caching → {os.path.basename(cache_dir)}"):
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        img_file = os.path.join(cache_dir, stem + "_img.npy")
-        mask_file = os.path.join(cache_dir, stem + "_mask.npy")
-        if not os.path.exists(img_file):
-            img, mask = load_and_preprocess(img_path, mask_path, patch_size)
-            np.save(img_file, img)
-            np.save(mask_file, mask)
-        cached.append((img_file, mask_file))
-
-    # Quick sanity check
-    test_img = np.load(cached[0][0])
-    test_mask = np.load(cached[0][1])
-    print(f"  Cache OK — img: {test_img.shape} {test_img.dtype} | "
-          f"mask: {test_mask.shape} unique: {np.unique(test_mask).tolist()}")
-    return cached
-# endregion
-
-# region Global-bbox cache  (3D evaluation - required for volume assembly)
-def _compute_global_bbox(
-        mask_paths: list[str],
-        margin: int = 10,
-) -> tuple[int, int, int, int]:
-    """
-    Compute the union bounding box across ALL masks of one log.
-
-    Per-slice ``crop_to_foreground`` shifts the crop window as the log bends,
-    producing laterally misaligned slices when stacked into a 3D volume.
-    This function computes ONE bbox so every slice gets the same crop window,
-    preserving spatial coherence across the depth axis.
-
-    Returns  (y0, x0, y1, x1)
-    """
-    y_min_g = x_min_g = float("inf")
-    y_max_g = x_max_g = -float("inf")
-    h_ref = w_ref = None
-
-    for mp in mask_paths:
-        mask = cv2.imread(mp, cv2.IMREAD_UNCHANGED)
-        if mask is None:
-            continue
-        if h_ref is None:
-            h_ref, w_ref = mask.shape[:2]
-        coords = np.column_stack(np.where(mask > 0))
-        if coords.size == 0:
-            continue
-        y_min_g = min(y_min_g, coords[:, 0].min())
-        x_min_g = min(x_min_g, coords[:, 1].min())
-        y_max_g = max(y_max_g, coords[:, 0].max())
-        x_max_g = max(x_max_g, coords[:, 1].max())
-
-    if y_min_g == float("inf"):  # all-empty log — fall back to full frame
-        return 0, 0, h_ref or 512, w_ref or 512
-
-    return (
-        max(int(y_min_g) - margin, 0),
-        max(int(x_min_g) - margin, 0),
-        min(int(y_max_g) + margin, h_ref),
-        min(int(x_max_g) + margin, w_ref),
+    model = smp.UnetPlusPlus(
+        encoder_name    = "resnet34",
+        encoder_weights = None,       # weights loaded manually below
+        in_channels     = 1,
+        classes         = num_classes,
+        activation      = None,
     )
 
+    # Adapt pretrained ImageNet weights for 1-channel input
+    enc_w = tvm.resnet34(weights=tvm.ResNet34_Weights.IMAGENET1K_V1).state_dict()
+    enc_w["conv1.weight"] = enc_w["conv1.weight"].mean(dim=1, keepdim=True)
 
-def _load_slice_global_bbox(
-        img_path: str,
-        mask_path: str,
-        bbox: tuple[int, int, int, int],
-        patch_size: int = PATCH_SIZE,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Load one slice using a pre-computed fixed bbox (no per-slice shift)."""
-    y0, x0, y1, x1 = bbox
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-    if mask.shape[:2] != img.shape[:2]:
-        mask = cv2.resize(mask, (img.shape[1], img.shape[0]),
-                          interpolation=cv2.INTER_NEAREST)
-    img = img[y0:y1, x0:x1]
-    mask = mask[y0:y1, x0:x1]
-    img = cv2.resize(img, (patch_size, patch_size), interpolation=cv2.INTER_AREA)
-    mask = cv2.resize(mask, (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
-    img = img.astype(np.float32)
-    img = (img - img.mean()) / (img.std() + 1e-6)
-    return np.expand_dims(img, 0).astype(np.float32), remap_mask(mask).astype(np.int64)
+    model_dict = model.encoder.state_dict()
+    matched    = {k: v for k, v in enc_w.items()
+                  if k in model_dict and v.shape == model_dict[k].shape}
+    model_dict.update(matched)
+    model.encoder.load_state_dict(model_dict, strict=False)
+    print(f"  UNet++ encoder: {len(matched)}/{len(model_dict)} ImageNet weights loaded")
+    return model
+# endregion
 
 
-def build_cache_global(
-        pairs: list[tuple[str, str]],
-        cache_dir: str,
-        images_root: str,
-        force: bool = False,
-        patch_size: int = PATCH_SIZE,
-) -> list[tuple[str, str]]:
+# region Unified checkpoint loader
+def load_checkpoint(
+    model_cfg: dict,
+    device:    torch.device | None = None,
+    num_classes: int = NUM_CLASSES,
+) -> nn.Module:
     """
-    Cache test slices using a **per-log global bounding box**.
+    Build the right model architecture and load weights from *model_cfg["path"]*.
 
-    All slices of a log share the same spatial reference frame, which is
-    required for:
-      - correct 3D connectivity metrics (components, continuity)
-      - 3D MRF smoothing (voxels must be spatially aligned across z)
-      - 3D Plotly visualisations (cracks must not jump laterally)
-
-    Replaces ``build_cache`` for any code that stacks slices into a volume.
+    Parameters:
+    model_cfg : entry from ``config.MODELS``
+    device    : torch device; defaults to CUDA if available
     """
-    if force and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Group by log to compute one bbox per log
-    log_to_pairs: dict[str, list] = defaultdict(list)
-    for img_path, mask_path in pairs:
-        log_id = get_log_id(img_path, images_root)
-        log_to_pairs[log_id].append((img_path, mask_path))
+    model_type = model_cfg["type"]
+    if model_type == "dilated":
+        model = DilatedSegCNN(in_channels=1, num_classes=num_classes)
+    elif model_type == "unetpp":
+        model = build_unetpp(num_classes=num_classes)
+    else:
+        raise ValueError(f"Unknown model type: {model_type!r}. Expected 'dilated' or 'unetpp'.")
 
-    log_bboxes: dict[str, tuple] = {}
-    for log_id, log_pairs in log_to_pairs.items():
-        mask_paths_log = [mp for _, mp in log_pairs]
-        log_bboxes[log_id] = _compute_global_bbox(mask_paths_log)
-        y0, x0, y1, x1 = log_bboxes[log_id]
-        print(f"  {log_id}: global bbox  y:[{y0},{y1}]  x:[{x0},{x1}]")
-
-    cached = []
-    for img_path, mask_path in tqdm(pairs, desc="Caching (global bbox)"):
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        img_file = os.path.join(cache_dir, stem + "_img.npy")
-        mask_file = os.path.join(cache_dir, stem + "_mask.npy")
-        if not os.path.exists(img_file):
-            log_id = get_log_id(img_path, images_root)
-            bbox = log_bboxes[log_id]
-            img_arr, mask_arr = _load_slice_global_bbox(img_path, mask_path, bbox, patch_size)
-            np.save(img_file, img_arr)
-            np.save(mask_file, mask_arr)
-        cached.append((img_file, mask_file))
-
-    print(f"  Cache ready: {len(cached)} pairs (global bbox)")
-    return cached
+    state = torch.load(model_cfg["path"], map_location=device)
+    model.load_state_dict(state)
+    return model.to(device).eval()
 # endregion

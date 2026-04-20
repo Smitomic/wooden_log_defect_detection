@@ -28,3 +28,7 @@ Thumbs.db
 /notebooks/eval_cache
 /notebooks/eval_cache_3D/test
 /.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/notebooks/.ipynb_checkpoints
+/logs/20_trees_SegFormer/checkpoints
+/notebooks/.ipynb_checkpoints

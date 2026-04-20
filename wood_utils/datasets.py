@@ -1,246 +1,129 @@
-import os
-import shutil
-from collections import defaultdict
-
-import cv2
 import numpy as np
-from tqdm import tqdm
+import torch
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+import torchvision.transforms.v2 as transforms
+import torchvision.tv_tensors as tv_tensors
 
-from .config import CLASS_REMAP, PATCH_SIZE
-from .data import get_log_id
+from .config import PATCH_SIZE
 
 
-# region Crop / remap
-def crop_to_foreground(
-        img: np.ndarray,
-        mask: np.ndarray,
-        margin: int = 10,
-) -> tuple[np.ndarray, np.ndarray]:
-    # Tight crop around the non-background region of *mask*.
-    coords = np.column_stack(np.where(mask > 0))
-    if coords.size == 0:
+# Augmentation transform (used in training)
+DEFAULT_AUGMENT = transforms.Compose([
+    transforms.RandomRotation(degrees=(-180, 180)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomVerticalFlip(p=0.5),
+])
+
+
+# region Training dataset - loads from cache, optional augmentation + repeat
+class WoodTrainDataset(Dataset):
+    """
+    Loads from pre-computed .npy cache.
+
+    *repeat* copies each sample so one epoch sees each slice multiple times.
+    Augmentation is applied to all copies except the first (copy 0 = clean).
+    """
+
+    def __init__(
+        self,
+        cached_pairs: list[tuple[str, str]],
+        repeat:       int   = 5,
+        transform     = DEFAULT_AUGMENT,
+    ):
+        self.pairs     = cached_pairs
+        self.repeat    = repeat
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.pairs) * self.repeat
+
+    def __getitem__(self, idx: int):
+        base_idx   = idx % len(self.pairs)
+        repeat_idx = idx // len(self.pairs)
+
+        img_file, mask_file = self.pairs[base_idx]
+        img  = torch.tensor(np.load(img_file),  dtype=torch.float32)
+        mask = torch.tensor(np.load(mask_file), dtype=torch.long)
+
+        if self.transform is not None and repeat_idx > 0:
+            img  = tv_tensors.Image(img)
+            mask = tv_tensors.Mask(mask)
+            img, mask = self.transform(img, mask)
+            img  = torch.as_tensor(img,  dtype=torch.float32)
+            mask = torch.as_tensor(mask, dtype=torch.long)
+
         return img, mask
-    y_min, x_min = coords.min(axis=0)
-    y_max, x_max = coords.max(axis=0)
-    y_min = max(y_min - margin, 0);
-    x_min = max(x_min - margin, 0)
-    y_max = min(y_max + margin, img.shape[0])
-    x_max = min(x_max + margin, img.shape[1])
-    return img[y_min:y_max, x_min:x_max], mask[y_min:y_max, x_min:x_max]
-
-
-def remap_mask(mask: np.ndarray, class_remap: dict | None = None) -> np.ndarray:
-    """
-    Re-map raw GT pixel values to contiguous model class indices.
-
-    Default mapping (from config.CLASS_REMAP):
-        raw 1 → 0  Background
-        raw 2 → 1  Bark
-        raw 3 → 2  Wood
-        raw 4 → 3  Knot
-        raw 5 → 4  Crack
-    """
-    if class_remap is None:
-        class_remap = CLASS_REMAP
-    out = np.zeros_like(mask, dtype=np.int64)
-    for raw, idx in class_remap.items():
-        out[mask == raw] = idx
-    return out
 # endregion
 
-# region Single-slice load + preprocess
-def load_and_preprocess(
-        img_path: str,
-        mask_path: str,
-        patch_size: int = PATCH_SIZE,
-) -> tuple[np.ndarray, np.ndarray]:
+# region Validation / test dataset — no augmentation
+class WoodValDataset(Dataset):
+    # Loads from pre-computed .npy cache - no augmentation.
+
+    def __init__(self, cached_pairs: list[tuple[str, str]]):
+        self.pairs = cached_pairs
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int):
+        img_file, mask_file = self.pairs[idx]
+        img  = torch.tensor(np.load(img_file),  dtype=torch.float32)
+        mask = torch.tensor(np.load(mask_file), dtype=torch.long)
+        return img, mask
+# endregion
+
+# region Defect-aware sampler (training)
+def make_defect_aware_sampler(
+    cached_pairs:       list[tuple[str, str]],
+    repeat:             int   = 5,
+    defect_sample_ratio: float = 0.5,
+):
     """
-    Load one (image, mask) pair, apply per-slice crop, resize, and
-    **z-score normalise** the image.
+    Build a WeightedRandomSampler that guarantees at least
+    *defect_sample_ratio* of every batch comes from slices that contain
+    at least one Knot or Crack pixel.
 
-    Z-score normalisation is mandatory: the trained models were trained with
-    ``(img - mean) / std`` — NOT ``img / 255``.  Using /255 here will
-    produce silently wrong predictions.
-
-    Returns:
-    img  : float32 ndarray, shape (1, H, W), z-score normalised
-    mask : int64  ndarray, shape (H, W),    class indices 0–4
+    With 19 % of images having zero defects a naive sampler will waste
+    roughly 1 in 5 training steps on clean images.
     """
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-    if img is None: raise FileNotFoundError(img_path)
-    if mask is None: raise FileNotFoundError(mask_path)
+    from torch.utils.data import WeightedRandomSampler
 
-    if mask.shape[:2] != img.shape[:2]:
-        mask = cv2.resize(mask, (img.shape[1], img.shape[0]),
-                          interpolation=cv2.INTER_NEAREST)
+    DEFECT_CLASSES = {3, 4}
 
-    img, mask = crop_to_foreground(img, mask)
-    img = cv2.resize(img, (patch_size, patch_size), interpolation=cv2.INTER_AREA)
-    mask = cv2.resize(mask, (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
+    flags = []
+    for img_file, mask_file in cached_pairs:
+        mask = np.load(mask_file)
+        has_defect = any(int((mask == c).sum()) > 0 for c in DEFECT_CLASSES)
+        flags.append(has_defect)
 
-    # Z-score normalise (per-image, NOT per-dataset)
-    img = img.astype(np.float32)
-    img = (img - img.mean()) / (img.std() + 1e-6)
+    n_total   = len(flags) * repeat
+    n_defect  = sum(flags) * repeat
+    n_clean   = n_total - n_defect
 
-    return (
-        np.expand_dims(img, 0).astype(np.float32),
-        remap_mask(mask).astype(np.int64),
+    w_defect  = (defect_sample_ratio / n_defect)  if n_defect  > 0 else 1.0
+    w_clean   = ((1 - defect_sample_ratio) / n_clean) if n_clean > 0 else 1.0
+
+    weights = []
+    for _ in range(repeat):
+        for has_defect in flags:
+            weights.append(w_defect if has_defect else w_clean)
+
+    print(f"  Defect-aware sampler: {n_defect} defect / {n_clean} clean"
+          f"  (target ratio {defect_sample_ratio:.0%})")
+    return WeightedRandomSampler(weights, num_samples=n_total, replacement=True)
+# endregion
+
+# region Evaluation DataLoader (batched, in-memory)
+def make_eval_loader(
+    cached_pairs: list[tuple[str, str]],
+    batch_size:   int = 32,
+) -> DataLoader:
+    # Load all cached pairs into RAM and return a DataLoader.
+    imgs  = np.stack([np.load(p[0]) for p in cached_pairs])
+    masks = np.stack([np.load(p[1]) for p in cached_pairs])
+    ds    = TensorDataset(
+        torch.tensor(imgs,  dtype=torch.float32),
+        torch.tensor(masks, dtype=torch.long),
     )
-# endregion
-
-# region Per-slice cache  (training + 2D evaluation)
-def build_cache(
-        pairs: list[tuple[str, str]],
-        cache_dir: str,
-        force: bool = False,
-        patch_size: int = PATCH_SIZE,
-) -> list[tuple[str, str]]:
-    """
-    Pre-process all pairs and save as .npy files.
-    Returns a list of (img_npy_path, mask_npy_path) tuples.
-
-    Uses per-slice ``crop_to_foreground`` - appropriate for 2D evaluation
-    and training.  Not to be used for 3D volume assembly (use
-    ``build_cache_global`` instead).
-    """
-    if force and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
-
-    cached = []
-    for img_path, mask_path in tqdm(pairs, desc=f"Caching → {os.path.basename(cache_dir)}"):
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        img_file = os.path.join(cache_dir, stem + "_img.npy")
-        mask_file = os.path.join(cache_dir, stem + "_mask.npy")
-        if not os.path.exists(img_file):
-            img, mask = load_and_preprocess(img_path, mask_path, patch_size)
-            np.save(img_file, img)
-            np.save(mask_file, mask)
-        cached.append((img_file, mask_file))
-
-    # Quick sanity check
-    test_img = np.load(cached[0][0])
-    test_mask = np.load(cached[0][1])
-    print(f"  Cache OK — img: {test_img.shape} {test_img.dtype} | "
-          f"mask: {test_mask.shape} unique: {np.unique(test_mask).tolist()}")
-    return cached
-# endregion
-
-# region Global-bbox cache  (3D evaluation - required for volume assembly)
-def _compute_global_bbox(
-        mask_paths: list[str],
-        margin: int = 10,
-) -> tuple[int, int, int, int]:
-    """
-    Compute the union bounding box across ALL masks of one log.
-
-    Per-slice ``crop_to_foreground`` shifts the crop window as the log bends,
-    producing laterally misaligned slices when stacked into a 3D volume.
-    This function computes ONE bbox so every slice gets the same crop window,
-    preserving spatial coherence across the depth axis.
-
-    Returns  (y0, x0, y1, x1)
-    """
-    y_min_g = x_min_g = float("inf")
-    y_max_g = x_max_g = -float("inf")
-    h_ref = w_ref = None
-
-    for mp in mask_paths:
-        mask = cv2.imread(mp, cv2.IMREAD_UNCHANGED)
-        if mask is None:
-            continue
-        if h_ref is None:
-            h_ref, w_ref = mask.shape[:2]
-        coords = np.column_stack(np.where(mask > 0))
-        if coords.size == 0:
-            continue
-        y_min_g = min(y_min_g, coords[:, 0].min())
-        x_min_g = min(x_min_g, coords[:, 1].min())
-        y_max_g = max(y_max_g, coords[:, 0].max())
-        x_max_g = max(x_max_g, coords[:, 1].max())
-
-    if y_min_g == float("inf"):  # all-empty log - fall back to full frame
-        return 0, 0, h_ref or 512, w_ref or 512
-
-    return (
-        max(int(y_min_g) - margin, 0),
-        max(int(x_min_g) - margin, 0),
-        min(int(y_max_g) + margin, h_ref),
-        min(int(x_max_g) + margin, w_ref),
-    )
-
-
-def _load_slice_global_bbox(
-        img_path: str,
-        mask_path: str,
-        bbox: tuple[int, int, int, int],
-        patch_size: int = PATCH_SIZE,
-) -> tuple[np.ndarray, np.ndarray]:
-    # Load one slice using a pre-computed fixed bbox (no per-slice shift).
-    y0, x0, y1, x1 = bbox
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-    if mask.shape[:2] != img.shape[:2]:
-        mask = cv2.resize(mask, (img.shape[1], img.shape[0]),
-                          interpolation=cv2.INTER_NEAREST)
-    img = img[y0:y1, x0:x1]
-    mask = mask[y0:y1, x0:x1]
-    img = cv2.resize(img, (patch_size, patch_size), interpolation=cv2.INTER_AREA)
-    mask = cv2.resize(mask, (patch_size, patch_size), interpolation=cv2.INTER_NEAREST)
-    img = img.astype(np.float32)
-    img = (img - img.mean()) / (img.std() + 1e-6)
-    return np.expand_dims(img, 0).astype(np.float32), remap_mask(mask).astype(np.int64)
-
-
-def build_cache_global(
-        pairs: list[tuple[str, str]],
-        cache_dir: str,
-        images_root: str,
-        force: bool = False,
-        patch_size: int = PATCH_SIZE,
-) -> list[tuple[str, str]]:
-    """
-    Cache test slices using a **per-log global bounding box**.
-
-    All slices of a log share the same spatial reference frame, which is
-    required for:
-      - correct 3D connectivity metrics (components, continuity)
-      - 3D MRF smoothing (voxels must be spatially aligned across z)
-      - 3D Plotly visualisations (cracks must not jump laterally)
-
-    Replaces ``build_cache`` for any code that stacks slices into a volume.
-    """
-    if force and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
-
-    # Group by log to compute one bbox per log
-    log_to_pairs: dict[str, list] = defaultdict(list)
-    for img_path, mask_path in pairs:
-        log_id = get_log_id(img_path, images_root)
-        log_to_pairs[log_id].append((img_path, mask_path))
-
-    log_bboxes: dict[str, tuple] = {}
-    for log_id, log_pairs in log_to_pairs.items():
-        mask_paths_log = [mp for _, mp in log_pairs]
-        log_bboxes[log_id] = _compute_global_bbox(mask_paths_log)
-        y0, x0, y1, x1 = log_bboxes[log_id]
-        print(f"  {log_id}: global bbox  y:[{y0},{y1}]  x:[{x0},{x1}]")
-
-    cached = []
-    for img_path, mask_path in tqdm(pairs, desc="Caching (global bbox)"):
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        img_file = os.path.join(cache_dir, stem + "_img.npy")
-        mask_file = os.path.join(cache_dir, stem + "_mask.npy")
-        if not os.path.exists(img_file):
-            log_id = get_log_id(img_path, images_root)
-            bbox = log_bboxes[log_id]
-            img_arr, mask_arr = _load_slice_global_bbox(img_path, mask_path, bbox, patch_size)
-            np.save(img_file, img_arr)
-            np.save(mask_file, mask_arr)
-        cached.append((img_file, mask_file))
-
-    print(f"  Cache ready: {len(cached)} pairs (global bbox)")
-    return cached
+    return DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
 # endregion

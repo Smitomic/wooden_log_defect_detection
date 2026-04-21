@@ -1,0 +1,40 @@
+# Large data - mounted as volumes at runtime
+data/
+logs/
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Cache dirs created by notebooks
+eval_cache/
+cache/
+notebooks/cache/
+notebooks/eval_cache/
+
+# IDE / git
+.vscode/
+.idea/
+.git/
+.gitignore
+.gitattributes
+
+# Large model files if accidentally in project root
+*.pt
+*.pth
+*.onnx
+*.bin

@@ -1,0 +1,41 @@
+services:
+
+  wood-defect-cpu:
+    profiles:
+      - cpu
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: wood-defect:cpu
+    container_name: wood-defect-cpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./logs:/app/logs:ro
+      - ./outputs:/app/outputs
+    restart: unless-stopped
+
+  wood-defect-gpu:
+    profiles:
+      - gpu
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: wood-defect:gpu
+    container_name: wood-defect-gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./logs:/app/logs:ro
+      - ./outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+    restart: unless-stopped

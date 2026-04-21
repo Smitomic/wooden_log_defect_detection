@@ -119,7 +119,7 @@ def app_ui(request):
 
         # Header
         ui.div(
-            ui.h3("Wood Log Defect Segmentation – 3D Viewer",
+            ui.h3("Wood Log Defect Segmentation - 3D Viewer",
                   style="margin:0; font-weight:600;"),
             style=(
                 "background-color:#3B6E51; color:white; padding:14px 22px;"

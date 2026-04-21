@@ -68,7 +68,16 @@ def show_volume(
     fig = go.Figure()
 
     for cls, color in colors.items():
-        mask = (volume_3d != 0) if cls == 1 else (volume_3d == cls)
+        if cls == 1:
+            # Bark = outer hull of entire log (non-background)
+            mask = (volume_3d != 0)
+        elif cls == 2:
+            # Wood = full log interior minus bark, so it fills in behind
+            # Knot/Crack when those classes are toggled off in the legend.
+            # Uses volume_3d >= 2 (everything that isn't Background or Bark).
+            mask = (volume_3d >= 2)
+        else:
+            mask = (volume_3d == cls)
         if np.count_nonzero(mask) == 0:
             continue
         try:

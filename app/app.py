@@ -1,3 +1,4 @@
+import gc
 import os
 import shutil
 import sys
@@ -14,9 +15,7 @@ from src.pipelines.segmentation_pipeline import MODEL_REGISTRY, SegmentationPipe
 from src.visualization.volume_metrics import CLASS_LABELS, _OLD_CLASS_LABELS
 
 
-
 # Model choices for the UI dropdown
-
 MODEL_CHOICES = {
     "New models (5-class)": {
         "DilatedCNN+MRF log-split":    "DilatedCNN+MRF log-split",
@@ -247,6 +246,9 @@ def server(input, output, session):
         z_extent:      int,
     ) -> None:
         try:
+            cfg          = MODEL_REGISTRY.get(model_name, {})
+            class_scheme = cfg.get("class_scheme", "new")
+
             pipe = SegmentationPipeline(
                 model_name    = model_name,
                 apply_3d_mrf  = apply_3d_mrf,
@@ -270,12 +272,38 @@ def server(input, output, session):
             q.put(("status", "Rendering 3D mesh…"))
 
             from src.visualization.mesh_viewer import show_volume
-            fig = show_volume(refined_volume, title=f"3D - {model_name}")
+            fig = show_volume(
+                refined_volume,
+                title=f"3D - {model_name}",
+                class_scheme=class_scheme,
+            )
 
             q.put(("done", fig))
 
         except Exception as exc:
             q.put(("error", str(exc)))
+        finally:
+            # Explicitly release large arrays so GC can reclaim RAM.
+            # refined_volume and prob_volume can be several GB for long logs.
+            try:
+                refined_volume = None
+            except Exception:
+                pass
+            try:
+                pipe = None
+            except Exception:
+                pass
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            gc.collect()
+            # Clean up temp TIFF
+            try:
+                os.unlink(tiff_path)
+            except Exception:
+                pass
 
     # Poll queue every 250 ms
     @reactive.effect
@@ -320,10 +348,16 @@ def server(input, output, session):
             )
             return
 
-        # Clear previous results
+        # Clear previous results and force GC before new run
         fig_val.set(None)
         metrics_val.set(None)
         session.send_custom_message("clear_plot", {})
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
         # Copy TIFF to temp file (Shiny deletes the upload after the request)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tiff")
@@ -432,6 +466,23 @@ def server(input, output, session):
                     <th>Components</th>
                     <th>Continuity</th>
                     <th>Compactness</th>
+                </tr>
+            </thead>
+            <tbody>{rows_html}</tbody>
+        </table>"""
+
+        return ui.HTML(table_html)
+
+        table_html = f"""
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Class</th>
+                    <th>Volume</th>
+                    <th>Components</th>
+                    <th>Continuity</th>
+                    <th>Compactness</th>
+                    <th>Anomalies</th>
                 </tr>
             </thead>
             <tbody>{rows_html}</tbody>

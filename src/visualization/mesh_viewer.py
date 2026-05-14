@@ -71,7 +71,7 @@ def show_volume(
         if cls == 1:
             # Bark = outer hull of entire log (non-background)
             mask = (volume_3d != 0)
-        elif cls == 2:
+        elif cls == 2 and class_scheme == "new":
             # Wood = full log interior minus bark, so it fills in behind
             # Knot/Crack when those classes are toggled off in the legend.
             # Uses volume_3d >= 2 (everything that isn't Background or Bark).
